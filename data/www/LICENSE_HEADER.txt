@@ -1,0 +1,8 @@
+/*
+ * Encoder3D CNC Controller - Web Interface
+ * 
+ * Copyright (c) 2025 Encoder3D Project Contributors
+ * Licensed under the MIT License. See LICENSE file for details.
+ * 
+ * Modern web-based control interface
+ */

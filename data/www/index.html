@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<!--
+  Encoder3D CNC Controller - Web Interface
+  
+  Copyright (c) 2025 Encoder3D Project Contributors
+  Licensed under the MIT License. See LICENSE file for details.
+-->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Encoder3D Controller</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🔧 Encoder3D CNC Controller</h1>
+            <div class="status-bar">
+                <span id="connection-status" class="status-badge disconnected">Disconnected</span>
+                <span id="mode-status" class="status-badge">3D Printer</span>
+            </div>
+        </header>
+
+        <div class="main-grid">
+            <!-- Left Panel: Position & Control -->
+            <div class="panel">
+                <h2>Position Control</h2>
+                <div class="position-display">
+                    <div class="axis-display">
+                        <label>X:</label>
+                        <span id="pos-x">0.00</span> mm
+                    </div>
+                    <div class="axis-display">
+                        <label>Y:</label>
+                        <span id="pos-y">0.00</span> mm
+                    </div>
+                    <div class="axis-display">
+                        <label>Z:</label>
+                        <span id="pos-z">0.00</span> mm
+                    </div>
+                    <div class="axis-display">
+                        <label>E:</label>
+                        <span id="pos-e">0.00</span> mm
+                    </div>
+                </div>
+
+                <div class="jog-control">
+                    <h3>Jog Controls</h3>
+                    <div class="jog-distance">
+                        <label>Step Size:</label>
+                        <select id="jog-distance">
+                            <option value="0.1">0.1mm</option>
+                            <option value="1" selected>1mm</option>
+                            <option value="10">10mm</option>
+                            <option value="100">100mm</option>
+                        </select>
+                    </div>
+                    
+                    <div class="jog-xy">
+                        <button class="jog-btn" onclick="jog('Y', 1)">Y+</button>
+                        <div class="jog-xy-row">
+                            <button class="jog-btn" onclick="jog('X', -1)">X-</button>
+                            <button class="jog-btn home-btn" onclick="homeAll()">🏠</button>
+                            <button class="jog-btn" onclick="jog('X', 1)">X+</button>
+                        </div>
+                        <button class="jog-btn" onclick="jog('Y', -1)">Y-</button>
+                    </div>
+                    
+                    <div class="jog-z">
+                        <button class="jog-btn" onclick="jog('Z', 1)">Z+</button>
+                        <button class="jog-btn" onclick="jog('Z', -1)">Z-</button>
+                    </div>
+                </div>
+
+                <div class="home-controls">
+                    <button class="btn" onclick="homeAxis('X')">Home X</button>
+                    <button class="btn" onclick="homeAxis('Y')">Home Y</button>
+                    <button class="btn" onclick="homeAxis('Z')">Home Z</button>
+                </div>
+            </div>
+
+            <!-- Middle Panel: Temperature & Mode -->
+            <div class="panel">
+                <h2>Temperature Control</h2>
+                <div class="temp-control">
+                    <div class="temp-item">
+                        <h3>Hotend</h3>
+                        <div class="temp-display">
+                            <span id="temp-hotend-current" class="temp-current">0</span>°C /
+                            <span id="temp-hotend-target" class="temp-target">0</span>°C
+                        </div>
+                        <div class="temp-input">
+                            <input type="number" id="hotend-target" min="0" max="280" value="0">
+                            <button class="btn" onclick="setTemperature('hotend')">Set</button>
+                        </div>
+                        <div class="temp-presets">
+                            <button class="btn-small" onclick="setTemp('hotend', 0)">Off</button>
+                            <button class="btn-small" onclick="setTemp('hotend', 200)">PLA</button>
+                            <button class="btn-small" onclick="setTemp('hotend', 240)">ABS</button>
+                        </div>
+                    </div>
+
+                    <div class="temp-item">
+                        <h3>Bed</h3>
+                        <div class="temp-display">
+                            <span id="temp-bed-current" class="temp-current">0</span>°C /
+                            <span id="temp-bed-target" class="temp-target">0</span>°C
+                        </div>
+                        <div class="temp-input">
+                            <input type="number" id="bed-target" min="0" max="120" value="0">
+                            <button class="btn" onclick="setTemperature('bed')">Set</button>
+                        </div>
+                        <div class="temp-presets">
+                            <button class="btn-small" onclick="setTemp('bed', 0)">Off</button>
+                            <button class="btn-small" onclick="setTemp('bed', 60)">PLA</button>
+                            <button class="btn-small" onclick="setTemp('bed', 100)">ABS</button>
+                        </div>
+                    </div>
+                </div>
+
+                <h2>Operation Mode</h2>
+                <div class="mode-selector">
+                    <button class="mode-btn active" onclick="setMode('printer')">3D Printer</button>
+                    <button class="mode-btn" onclick="setMode('cnc')">CNC Spindle</button>
+                    <button class="mode-btn" onclick="setMode('laser')">Laser Cutter</button>
+                </div>
+
+                <div class="emergency-section">
+                    <button class="emergency-btn" onclick="emergencyStop()">🛑 EMERGENCY STOP</button>
+                </div>
+            </div>
+
+            <!-- Right Panel: Console & File Upload -->
+            <div class="panel">
+                <h2>G-Code Console</h2>
+                <div class="console-container">
+                    <div class="console" id="console"></div>
+                    <div class="console-input">
+                        <input type="text" id="gcode-input" placeholder="Enter G-code command...">
+                        <button class="btn" onclick="sendCommand()">Send</button>
+                    </div>
+                </div>
+
+                <h2>File Upload</h2>
+                <div class="file-upload">
+                    <input type="file" id="gcode-file" accept=".gcode,.nc,.txt">
+                    <button class="btn" onclick="uploadFile()">Upload G-Code</button>
+                </div>
+
+                <h2>Quick Commands</h2>
+                <div class="quick-commands">
+                    <button class="btn-small" onclick="sendGCode('M105')">Report Temps</button>
+                    <button class="btn-small" onclick="sendGCode('M114')">Report Position</button>
+                    <button class="btn-small" onclick="sendGCode('G92 X0 Y0 Z0')">Set Zero</button>
+                    <button class="btn-small" onclick="sendGCode('M84')">Disable Motors</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Visualization Area (for future 3D model viewer) -->
+        <div class="panel visualization-panel">
+            <h2>Visualization</h2>
+            <div id="visualization" class="visualization-area">
+                <p>3D visualization coming soon...</p>
+                <p>This area will display the loaded model and current toolpath.</p>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

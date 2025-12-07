@@ -1,0 +1,86 @@
+NOTICE
+
+Encoder3D CNC Controller
+Copyright (c) 2025 Encoder3D Project Contributors
+
+This product includes software developed by the Encoder3D project contributors.
+
+================================================================================
+
+THIRD-PARTY SOFTWARE NOTICES AND INFORMATION
+
+This project incorporates components from the projects listed below.
+The original copyright notices and the licenses under which we received
+such components are set forth below. We reserve all rights not expressly
+granted herein, whether by implication, estoppel or otherwise.
+
+================================================================================
+
+1. ArduinoJson (https://github.com/bblanchon/ArduinoJson)
+   Copyright © 2014-2024, Benoit Blanchon
+   Licensed under the MIT License
+
+2. ESPAsyncWebServer (https://github.com/me-no-dev/ESPAsyncWebServer)
+   Copyright (c) 2016 me-no-dev
+   Licensed under the LGPL-3.0 License
+
+3. AsyncTCP (https://github.com/me-no-dev/AsyncTCP)
+   Copyright (c) 2016 me-no-dev
+   Licensed under the LGPL-3.0 License
+
+4. Encoder Library (https://github.com/PaulStoffregen/Encoder)
+   Copyright (c) 2011-2018 PJRC.COM, LLC - Paul Stoffregen
+   Licensed under the MIT License
+
+5. Arduino-ESP32 (https://github.com/espressif/arduino-esp32)
+   Copyright 2015-2024 Espressif Systems (Shanghai) PTE LTD
+   Licensed under the LGPL-2.1 License
+
+6. PlatformIO (https://platformio.org/)
+   Licensed under the Apache License 2.0
+
+For complete license texts and attributions, see THIRD_PARTY_LICENSES.md
+
+================================================================================
+
+SAFETY NOTICE
+
+This software controls machinery that can cause physical harm if improperly
+configured or operated. Users of this software assume all responsibility for:
+
+- Proper hardware configuration and testing
+- Implementation of appropriate safety measures
+- Emergency stop mechanisms
+- Thermal protection and monitoring
+- Electrical safety compliance
+- Risk assessment and mitigation
+
+The authors and contributors of this software provide it "AS IS" without any
+warranty and shall not be liable for any damages arising from its use.
+
+Always follow proper safety protocols when working with CNC machinery,
+motors, heaters, and other potentially hazardous equipment.
+
+================================================================================
+
+EXPORT COMPLIANCE
+
+This software may be subject to export control regulations. Users are
+responsible for ensuring compliance with applicable export control laws
+and regulations in their jurisdiction.
+
+================================================================================
+
+DISCLAIMER
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+================================================================================
+
+For more information, visit: https://github.com/[your-username]/encoder3d
