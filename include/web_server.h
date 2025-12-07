@@ -64,6 +64,13 @@ private:
     void handleSDDelete(AsyncWebServerRequest *request);
     void handleSDDownload(AsyncWebServerRequest *request);
     
+    // LittleFS REST API
+    void handleLittleFSList(AsyncWebServerRequest *request);
+    void handleLittleFSUpload(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final);
+    void handleLittleFSDownload(AsyncWebServerRequest *request);
+    void handleLittleFSDelete(AsyncWebServerRequest *request);
+    void handleLittleFSPrint(AsyncWebServerRequest *request);
+    
     // WebSocket handlers
     void onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type, void *arg, uint8_t *data, size_t len);
     static void handleWebSocketMessage(void *arg, uint8_t *data, size_t len);

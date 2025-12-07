@@ -11,6 +11,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Encoder3D Controller</title>
     <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/three@0.159.0/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.159.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.159.0/examples/js/loaders/STLLoader.js"></script>
 </head>
 <body>
     <div class="container">
@@ -20,8 +23,15 @@
                 <span id="connection-status" class="status-badge disconnected">Disconnected</span>
                 <span id="mode-status" class="status-badge">3D Printer</span>
             </div>
+            <nav class="main-nav">
+                <button class="nav-btn active" onclick="showTab('control')">Control</button>
+                <button class="nav-btn" onclick="showTab('model')">Model Viewer</button>
+                <button class="nav-btn" onclick="showTab('files')">File Manager</button>
+            </nav>
         </header>
 
+        <!-- Tab: Control Panel -->
+        <div id="tab-control" class="tab-content active">
         <div class="main-grid">
             <!-- Left Panel: Position & Control -->
             <div class="panel">
@@ -135,11 +145,13 @@
             <div class="panel">
                 <h2>G-Code Console</h2>
                 <div class="console-container">
-                    <div class="console" id="console"></div>
-                    <div class="console-input">
-                        <input type="text" id="gcode-input" placeholder="Enter G-code command...">
-                        <button class="btn" onclick="sendCommand()">Send</button>
-                    </div>
+                <h2>File Upload</h2>
+                <div class="file-upload">
+                    <input type="file" id="gcode-file" accept=".gcode,.nc,.txt">
+                    <button class="btn" onclick="uploadGCodeFile()">Upload to LittleFS</button>
+                    <button class="btn" onclick="uploadToSD()">Upload to SD Card</button>
+                    <p class="help-text">LittleFS: Max 100KB | SD Card: Unlimited</p>
+                </div>div>
                 </div>
 
                 <h2>File Upload</h2>
@@ -152,16 +164,173 @@
                 <div class="quick-commands">
                     <button class="btn-small" onclick="sendGCode('M105')">Report Temps</button>
                     <button class="btn-small" onclick="sendGCode('M114')">Report Position</button>
-                    <button class="btn-small" onclick="sendGCode('G92 X0 Y0 Z0')">Set Zero</button>
-                    <button class="btn-small" onclick="sendGCode('M84')">Disable Motors</button>
                 </div>
             </div>
         </div>
+        </div>
+        <!-- End Tab: Control -->
 
-        <!-- Visualization Area (for future 3D model viewer) -->
-        <div class="panel visualization-panel">
+        <!-- Tab: Model Viewer & Slicer -->
+        <div id="tab-model" class="tab-content">
+            <div class="model-grid">
+                <!-- 3D Viewer Panel -->
+                <div class="panel viewer-panel">
+                    <h2>STL Viewer</h2>
+                    <div id="viewer-container" class="viewer-3d"></div>
+                    <div class="viewer-controls">
+    </div>
+
+    <script src="app.js"></script>
+    <script src="viewer.js"></script>
+    <script src="slicer.js"></script>
+    <script src="filemanager.js"></script>
+</body>
+</html>                     <input type="checkbox" id="show-grid" checked onchange="toggleGrid()"> Grid
+                        </label>
+                        <label>
+                            <input type="checkbox" id="show-axes" checked onchange="toggleAxes()"> Axes
+                        </label>
+                    </div>
+                    <div class="model-info">
+                        <div><strong>Model:</strong> <span id="model-name">None loaded</span></div>
+                        <div><strong>Size:</strong> <span id="model-size">-</span></div>
+                        <div><strong>Vertices:</strong> <span id="model-vertices">-</span></div>
+                    </div>
+                </div>
+
+                <!-- Slicer Panel -->
+                <div class="panel slicer-panel">
+                    <h2>Slicer Settings</h2>
+                    <div class="slicer-settings">
+                        <div class="setting-group">
+                            <h3>Print Settings</h3>
+                            <label>Layer Height (mm):
+                                <input type="number" id="layer-height" value="0.2" step="0.05" min="0.05" max="0.5">
+                            </label>
+                            <label>First Layer Height (mm):
+                                <input type="number" id="first-layer-height" value="0.3" step="0.05" min="0.1" max="1.0">
+                            </label>
+                            <label>Infill %:
+                                <input type="number" id="infill" value="20" min="0" max="100">
+                            </label>
+                            <label>Print Speed (mm/s):
+                                <input type="number" id="print-speed" value="60" min="10" max="200">
+                            </label>
+                        </div>
+
+                        <div class="setting-group">
+                            <h3>Temperature</h3>
+                            <label>Nozzle (°C):
+                                <input type="number" id="slice-nozzle-temp" value="200" min="0" max="280">
+                            </label>
+                            <label>Bed (°C):
+                                <input type="number" id="slice-bed-temp" value="60" min="0" max="120">
+                            </label>
+                        </div>
+
+                        <div class="setting-group">
+                            <h3>Perimeters & Support</h3>
+                            <label>Wall Lines:
+                                <input type="number" id="wall-lines" value="3" min="1" max="10">
+                            </label>
+                            <label>Top Layers:
+                                <input type="number" id="top-layers" value="4" min="0" max="20">
+                            </label>
+                            <label>Bottom Layers:
+                                <input type="number" id="bottom-layers" value="4" min="0" max="20">
+                            </label>
+                            <label>
+                                <input type="checkbox" id="enable-support"> Generate Support
+                            </label>
+                        </div>
+
+                        <div class="setting-group">
+                            <h3>Actions</h3>
+                            <div class="file-upload">
+                                <input type="file" id="stl-file" accept=".stl">
+                                <button class="btn" onclick="loadSTL()">Load STL</button>
+                            </div>
+                            <button class="btn btn-primary" onclick="sliceModel()">Slice to G-Code</button>
+                            <div id="slice-progress" class="progress-bar" style="display:none;">
+                                <div id="slice-progress-fill" class="progress-fill"></div>
+                                <span id="slice-progress-text">Slicing...</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- G-Code Preview Panel -->
+                <div class="panel gcode-panel">
+                    <h2>G-Code Preview</h2>
+                    <div id="gcode-stats" class="gcode-stats">
+                        <div><strong>Lines:</strong> <span id="gcode-lines">0</span></div>
+                        <div><strong>Est. Time:</strong> <span id="gcode-time">-</span></div>
+                        <div><strong>Filament:</strong> <span id="gcode-filament">-</span></div>
+                        <div><strong>Size:</strong> <span id="gcode-size">0 KB</span></div>
+                    </div>
+                    <textarea id="gcode-preview" class="gcode-textarea" readonly placeholder="G-code will appear here after slicing..."></textarea>
+                    <div class="gcode-actions">
+                        <button class="btn" onclick="downloadGCode()">Download G-Code</button>
+                        <button class="btn btn-primary" onclick="uploadSlicedGCode()">Upload to LittleFS</button>
+                        <button class="btn" onclick="uploadSlicedToSD()">Upload to SD Card</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- End Tab: Model Viewer -->
+
+        <!-- Tab: File Manager -->
+        <div id="tab-files" class="tab-content">
+            <div class="file-manager-grid">
+                <!-- LittleFS Files -->
+                <div class="panel">
+                    <h2>LittleFS Files (≤100KB)</h2>
+                    <div class="file-actions">
+                        <button class="btn" onclick="refreshLittleFSFiles()">🔄 Refresh</button>
+                        <span class="help-text">System storage for small files</span>
+                    </div>
+                    <div id="littlefs-files" class="file-list">
+                        <p class="loading">Loading files...</p>
+                    </div>
+                </div>
+
+                <!-- SD Card Files -->
+                <div class="panel">
+                    <h2>SD Card Files</h2>
+                    <div class="file-actions">
+                        <button class="btn" onclick="refreshSDFiles()">🔄 Refresh</button>
+                        <button class="btn" onclick="initSD()">Initialize SD</button>
+                    </div>
+                    <div id="sd-status" class="sd-status">
+                        <strong>Status:</strong> <span id="sd-status-text">Unknown</span>
+                    </div>
+                    <div id="sd-print-status" class="print-status" style="display:none;">
+                        <div><strong>File:</strong> <span id="current-file">-</span></div>
+                        <div><strong>Progress:</strong> <span id="print-progress">0</span>%</div>
+                        <div><strong>Lines:</strong> <span id="lines-executed">0</span></div>
+                        <div class="progress-bar">
+                            <div id="print-progress-fill" class="progress-fill"></div>
+                        </div>
+                        <div class="print-controls">
+                            <button class="btn" onclick="pausePrint()">⏸ Pause</button>
+                            <button class="btn" onclick="resumePrint()">▶ Resume</button>
+                            <button class="btn btn-danger" onclick="stopPrint()">⏹ Stop</button>
+                        </div>
+                    </div>
+                    <div id="sd-files" class="file-list">
+                        <p class="loading">Click refresh to load files...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- End Tab: Files -->
+
+        <!-- Visualization Area (moved from bottom) -->
+        <div class="panel visualization-panel" style="display:none;">
             <h2>Visualization</h2>
             <div id="visualization" class="visualization-area">
+                <p>3D visualization coming soon...</p>
+                <p>This area will display the loaded model and current toolpath.</p>
                 <p>3D visualization coming soon...</p>
                 <p>This area will display the loaded model and current toolpath.</p>
             </div>

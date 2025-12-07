@@ -157,6 +157,32 @@ void WebServerManager::setupRoutes() {
         this->handleSDDownload(request);
     });
     
+    // LittleFS REST API endpoints
+    server->on("/api/littlefs/list", HTTP_GET, [this](AsyncWebServerRequest *request) {
+        this->handleLittleFSList(request);
+    });
+    
+    server->on("/api/littlefs/upload", HTTP_POST,
+        [](AsyncWebServerRequest *request) {
+            request->send(200);
+        },
+        [this](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
+            this->handleLittleFSUpload(request, filename, index, data, len, final);
+        }
+    );
+    
+    server->on("/api/littlefs/download", HTTP_GET, [this](AsyncWebServerRequest *request) {
+        this->handleLittleFSDownload(request);
+    });
+    
+    server->on("/api/littlefs/delete", HTTP_POST, [this](AsyncWebServerRequest *request) {
+        this->handleLittleFSDelete(request);
+    });
+    
+    server->on("/api/littlefs/print", HTTP_POST, [this](AsyncWebServerRequest *request) {
+        this->handleLittleFSPrint(request);
+    });
+    
     // 404 handler
     server->onNotFound([](AsyncWebServerRequest *request) {
         request->send(404, "text/plain", "Not found");
@@ -390,3 +416,189 @@ String WebServerManager::getIPAddress() {
         return WiFi.localIP().toString();
     }
 }
+
+// ============================================================================
+// SD Card REST API Handlers Implementation
+// ============================================================================
+
+void WebServerManager::handleSDDownload(AsyncWebServerRequest *request) {
+    SDCardManager* sd = SDCardManager::getInstance();
+    if (!sd || !sd->isInitialized()) {
+        request->send(503, "text/plain", "SD card not available");
+        return;
+    }
+    
+    if (!request->hasParam("file")) {
+        request->send(400, "text/plain", "No file specified");
+        return;
+    }
+    
+    String filename = request->getParam("file")->value();
+    if (!filename.startsWith("/")) {
+        filename = "/" + filename;
+    }
+    
+    if (!sd->fileExists(filename)) {
+        request->send(404, "text/plain", "File not found");
+        return;
+    }
+    
+    request->send(SD, filename, "application/octet-stream");
+}
+
+// ============================================================================
+// LittleFS REST API Handlers
+// ============================================================================
+
+void WebServerManager::handleLittleFSList(AsyncWebServerRequest *request) {
+    StaticJsonDocument<4096> doc;
+    JsonArray files = doc.createNestedArray("files");
+    
+    File root = LittleFS.open("/gcode");
+    if (!root) {
+        LittleFS.mkdir("/gcode");
+        root = LittleFS.open("/gcode");
+    }
+    
+    if (!root || !root.isDirectory()) {
+        request->send(500, "application/json", "{\"error\":\"Cannot open gcode directory\"}");
+        return;
+    }
+    
+    File file = root.openNextFile();
+    while (file) {
+        if (!file.isDirectory()) {
+            String name = String(file.name());
+            if (name.endsWith(".gcode") || name.endsWith(".nc") || name.endsWith(".txt")) {
+                JsonObject fileObj = files.createNestedObject();
+                int lastSlash = name.lastIndexOf('/');
+                if (lastSlash >= 0) {
+                    name = name.substring(lastSlash + 1);
+                }
+                fileObj["name"] = name;
+                fileObj["size"] = file.size();
+            }
+        }
+        file = root.openNextFile();
+    }
+    root.close();
+    
+    String output;
+    serializeJson(doc, output);
+    request->send(200, "application/json", output);
+}
+
+void WebServerManager::handleLittleFSUpload(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
+    static File uploadFile;
+    const size_t MAX_LITTLEFS_SIZE = 100 * 1024;
+    
+    if (index == 0) {
+        if (filename.length() == 0 || filename.length() > 64) {
+            Serial.println("Invalid filename");
+            return;
+        }
+        
+        Serial.printf("LittleFS upload start: %s\n", filename.c_str());
+        
+        if (!LittleFS.exists("/gcode")) {
+            LittleFS.mkdir("/gcode");
+        }
+        
+        String path = "/gcode/" + filename;
+        uploadFile = LittleFS.open(path, "w");
+        
+        if (!uploadFile) {
+            Serial.println("Failed to open file for writing");
+            return;
+        }
+    }
+    
+    if (index + len > MAX_LITTLEFS_SIZE) {
+        Serial.println("File too large for LittleFS");
+        if (uploadFile) {
+            uploadFile.close();
+        }
+        return;
+    }
+    
+    if (uploadFile) {
+        size_t written = uploadFile.write(data, len);
+        if (written != len) {
+            Serial.println("Write error");
+        }
+    }
+    
+    if (final) {
+        if (uploadFile) {
+            uploadFile.flush();
+            uploadFile.close();
+        }
+        Serial.printf("Upload complete: %s (%u bytes)\n", filename.c_str(), index + len);
+    }
+}
+
+void WebServerManager::handleLittleFSDownload(AsyncWebServerRequest *request) {
+    if (!request->hasParam("file")) {
+        request->send(400, "text/plain", "No file specified");
+        return;
+    }
+    
+    String filename = request->getParam("file")->value();
+    String path = "/gcode/" + filename;
+    
+    if (!LittleFS.exists(path)) {
+        request->send(404, "text/plain", "File not found");
+        return;
+    }
+    
+    request->send(LittleFS, path, "application/octet-stream");
+}
+
+void WebServerManager::handleLittleFSDelete(AsyncWebServerRequest *request) {
+    if (!request->hasParam("file", true)) {
+        request->send(400, "application/json", "{\"error\":\"No file specified\"}");
+        return;
+    }
+    
+    String filename = request->getParam("file", true)->value();
+    String path = "/gcode/" + filename;
+    
+    if (LittleFS.remove(path)) {
+        request->send(200, "application/json", "{\"status\":\"deleted\"}");
+    } else {
+        request->send(500, "application/json", "{\"error\":\"Delete failed\"}");
+    }
+}
+
+void WebServerManager::handleLittleFSPrint(AsyncWebServerRequest *request) {
+    if (!request->hasParam("file")) {
+        request->send(400, "application/json", "{\"error\":\"No file specified\"}");
+        return;
+    }
+    
+    String filename = request->getParam("file")->value();
+    String path = "/gcode/" + filename;
+    
+    if (!LittleFS.exists(path)) {
+        request->send(404, "application/json", "{\"error\":\"File not found\"}");
+        return;
+    }
+    
+    File file = LittleFS.open(path, "r");
+    if (!file) {
+        request->send(500, "application/json", "{\"error\":\"Cannot open file\"}");
+        return;
+    }
+    
+    while (file.available()) {
+        String line = file.readStringUntil('\n');
+        line.trim();
+        if (line.length() > 0 && !line.startsWith(";")) {
+            gcode_parser->processLine(line);
+        }
+    }
+    file.close();
+    
+    request->send(200, "application/json", "{\"status\":\"printing\"}");
+}
+
