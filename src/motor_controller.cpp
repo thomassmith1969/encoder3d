@@ -83,16 +83,15 @@ Motor::~Motor() {
 }
 
 void Motor::begin() {
-    pinMode(pins.pwm, OUTPUT);
-    pinMode(pins.dir, OUTPUT);
-    pinMode(pins.enable, OUTPUT);
+    pinMode(pins.in1, OUTPUT);
+    pinMode(pins.in2, OUTPUT);
     
-    // Setup PWM
+    // Setup PWM Channel
     ledcSetup(id, 20000, 8);  // 20kHz, 8-bit resolution
-    ledcAttachPin(pins.pwm, id);
     
-    digitalWrite(pins.dir, LOW);
-    digitalWrite(pins.enable, HIGH);  // Assuming active low
+    // Initial state: Stop
+    digitalWrite(pins.in1, LOW);
+    digitalWrite(pins.in2, LOW);
     
     encoder->write(0);
     pid->reset();
@@ -100,12 +99,11 @@ void Motor::begin() {
 
 void Motor::enable() {
     enabled = true;
-    digitalWrite(pins.enable, LOW);  // Active low
+    // No enable pin to control (Hardwired)
 }
 
 void Motor::disable() {
     enabled = false;
-    digitalWrite(pins.enable, HIGH);
     applyMotorControl(0);
 }
 
@@ -200,23 +198,40 @@ void Motor::emergencyStop() {
 
 void Motor::applyMotorControl(int pwm_value) {
     if (!enabled) {
-        ledcWrite(id, 0);
+        ledcDetachPin(pins.in1);
+        ledcDetachPin(pins.in2);
+        digitalWrite(pins.in1, LOW);
+        digitalWrite(pins.in2, LOW);
         return;
-    }
-    
-    // Set direction
-    if (pwm_value < 0) {
-        digitalWrite(pins.dir, HIGH);
-        pwm_value = -pwm_value;
-    } else {
-        digitalWrite(pins.dir, LOW);
     }
     
     // Limit PWM
     if (pwm_value > 255) pwm_value = 255;
-    if (pwm_value < 0) pwm_value = 0;
+    if (pwm_value < -255) pwm_value = -255;
     
-    ledcWrite(id, pwm_value);
+    int speed = abs(pwm_value);
+    
+    // Set direction and PWM
+    if (pwm_value > 0) {
+        // Forward: IN1=PWM, IN2=LOW
+        ledcDetachPin(pins.in2);
+        digitalWrite(pins.in2, LOW);
+        ledcAttachPin(pins.in1, id);
+        ledcWrite(id, speed);
+    } else if (pwm_value < 0) {
+        // Reverse: IN1=LOW, IN2=PWM
+        ledcDetachPin(pins.in1);
+        digitalWrite(pins.in1, LOW);
+        ledcAttachPin(pins.in2, id);
+        ledcWrite(id, speed);
+    } else {
+        // Stop
+        ledcDetachPin(pins.in1);
+        ledcDetachPin(pins.in2);
+        digitalWrite(pins.in1, LOW);
+        digitalWrite(pins.in2, LOW);
+        ledcWrite(id, 0);
+    }
 }
 
 float Motor::encoderCountsToMM(int32_t counts) {
@@ -233,10 +248,8 @@ int32_t Motor::mmToEncoderCounts(float mm) {
 
 MotorController::MotorController() : is_running(false), control_task_handle(NULL) {
     // Initialize motors with their configurations
-    motors[MOTOR_X1] = new Motor(MOTOR_X1, MOTOR_PINS[MOTOR_X1], STEPS_PER_MM_X, MAX_SPEED_X, MAX_ACCEL_X);
-    motors[MOTOR_X2] = new Motor(MOTOR_X2, MOTOR_PINS[MOTOR_X2], STEPS_PER_MM_X, MAX_SPEED_X, MAX_ACCEL_X);
-    motors[MOTOR_Y1] = new Motor(MOTOR_Y1, MOTOR_PINS[MOTOR_Y1], STEPS_PER_MM_Y, MAX_SPEED_Y, MAX_ACCEL_Y);
-    motors[MOTOR_Y2] = new Motor(MOTOR_Y2, MOTOR_PINS[MOTOR_Y2], STEPS_PER_MM_Y, MAX_SPEED_Y, MAX_ACCEL_Y);
+    motors[MOTOR_X] = new Motor(MOTOR_X, MOTOR_PINS[MOTOR_X], STEPS_PER_MM_X, MAX_SPEED_X, MAX_ACCEL_X);
+    motors[MOTOR_Y] = new Motor(MOTOR_Y, MOTOR_PINS[MOTOR_Y], STEPS_PER_MM_Y, MAX_SPEED_Y, MAX_ACCEL_Y);
     motors[MOTOR_Z] = new Motor(MOTOR_Z, MOTOR_PINS[MOTOR_Z], STEPS_PER_MM_Z, MAX_SPEED_Z, MAX_ACCEL_Z);
     motors[MOTOR_E] = new Motor(MOTOR_E, MOTOR_PINS[MOTOR_E], STEPS_PER_MM_E, MAX_SPEED_E, MAX_ACCEL_E);
 }

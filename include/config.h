@@ -16,39 +16,38 @@
 // HARDWARE CONFIGURATION
 // ============================================================================
 
-// Motor Configuration - 6 axis encoder motors
-#define NUM_MOTORS 6
+// Motor Configuration - 4 axis encoder motors (Standard XYZ + Extruder)
+#define NUM_MOTORS 4
 
 // Motor indices
-#define MOTOR_X1 0
-#define MOTOR_X2 1
-#define MOTOR_Y1 2
-#define MOTOR_Y2 3
-#define MOTOR_Z 4
-#define MOTOR_E 5
+#define MOTOR_X 0
+#define MOTOR_Y 1
+#define MOTOR_Z 2
+#define MOTOR_E 3
 
-// Motor pin assignments (PWM, DIR, ENCODER_A, ENCODER_B)
+// Motor pin assignments (IN1, IN2, ENCODER_A, ENCODER_B, ENABLE)
+// L298N Mode: 2-Pin Drive (IN1/IN2). ENA hardwired to 5V.
+// Bi-directional PWM: Forward (IN1=PWM, IN2=L), Reverse (IN1=L, IN2=PWM)
 struct MotorPins {
-    uint8_t pwm;
-    uint8_t dir;
+    uint8_t in1;
+    uint8_t in2;
     uint8_t enc_a;
     uint8_t enc_b;
     uint8_t enable;
 };
 
-// Pin definitions for Lolin32 Lite
+// Pin definitions for Lolin32 Lite (20 Pins Used)
+// 4 Motors with Full Quadrature Encoders (A+B)
 const MotorPins MOTOR_PINS[NUM_MOTORS] = {
-    {25, 26, 34, 35, 27},  // X1
-    {32, 33, 36, 39, 14},  // X2
-    {12, 13, 15, 2, 4},    // Y1
-    {16, 17, 5, 18, 19},   // Y2
-    {21, 22, 23, 19, 27},  // Z
-    {0, 4, 16, 17, 5}      // Extruder
+    {22, 21, 34, 35, 255},  // X (IN1:22, IN2:21, A:34, B:35)
+    {19, 23, 36, 39, 255},  // Y (IN1:19, IN2:23, A:36, B:39)
+    {18, 5,  25, 26, 255},  // Z (IN1:18, IN2:5,  A:25, B:26)
+    {17, 16, 27, 14, 255}   // E (IN1:17, IN2:16, A:27, B:14)
 };
 
 // Encoder Configuration
 #define ENCODER_PPR 600  // Pulses per revolution
-#define COUNTS_PER_REV (ENCODER_PPR * 4)  // Quadrature = 4x
+#define COUNTS_PER_REV (ENCODER_PPR * 4)  // Full Quadrature = 4x
 
 // Motor Specifications
 #define STEPS_PER_MM_X 80.0
@@ -84,9 +83,10 @@ struct HeaterPins {
     uint8_t max_temp_pin;  // Optional MAX31865 CS pin
 };
 
+// ADC1 Pins used for Thermistors (WiFi safe)
 const HeaterPins HEATER_PINS[NUM_HEATERS] = {
-    {25, 34, 255},  // Hotend
-    {26, 35, 255}   // Bed
+    {4,  32, 255},  // Hotend (PWM: 4, ADC: 32)
+    {13, 33, 255}   // Bed    (PWM: 13, ADC: 33)
 };
 
 // Heater limits
