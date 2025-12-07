@@ -57,12 +57,20 @@ Heater::Heater(uint8_t heater_id, const HeaterPins& heater_pins, float max_tempe
     : id(heater_id), pins(heater_pins), max_temp(max_temperature), 
       kp(p), ki(i), kd(d), current_temp(0), target_temp(0),
       integral(0), prev_error(0), enabled(false), thermal_runaway_detected(false),
-      pwm_channel(heater_id + 10) {  // Offset to avoid motor PWM channels
+      pwm_channel(heater_id + 10),  // Offset to avoid motor PWM channels
+      alarm_system(nullptr), pid_tuner(nullptr), temp_tolerance(2.0),
+      last_alarm_check(0), settling_start_time(0), is_settling(false),
+      temp_history_index(0) {
     
     thermistor = new Thermistor(pins.thermistor);
     last_time = millis();
     safety_timer = millis();
     last_temp = 0;
+    
+    // Initialize temperature history
+    for (int i = 0; i < 20; i++) {
+        temp_history[i] = 0;
+    }
 }
 
 Heater::~Heater() {
@@ -86,6 +94,10 @@ void Heater::update() {
     // Read current temperature
     current_temp = thermistor->readTemperature();
     
+    // Store in history for analysis
+    temp_history[temp_history_index] = current_temp;
+    temp_history_index = (temp_history_index + 1) % 20;
+    
     // Safety checks
     if (current_temp > max_temp) {
         emergencyShutdown();
@@ -99,6 +111,17 @@ void Heater::update() {
     }
     
     checkThermalRunaway();
+    
+    // Check alarms periodically (every 500ms)
+    if (alarm_system && (millis() - last_alarm_check > 500)) {
+        checkAlarms();
+        last_alarm_check = millis();
+    }
+    
+    // Update PID tuner if active
+    if (pid_tuner && pid_tuner->isAutoTuning()) {
+        pid_tuner->update();
+    }
     
     if (!enabled || target_temp <= 0) {
         applyPower(0);
@@ -351,6 +374,127 @@ void HeaterController::disableHeater(uint8_t heater_id) {
     if (heater_id < NUM_HEATERS) {
         heaters[heater_id]->disable();
     }
+}
+
+// ============================================================================
+// Heater Alarm and Tuning Support
+// ============================================================================
+
+void Heater::setAlarmSystem(AlarmSystem* alarms) {
+    alarm_system = alarms;
+}
+
+void Heater::setPIDTuner(PIDTuner* tuner) {
+    pid_tuner = tuner;
+}
+
+void Heater::setTempTolerance(float tolerance) {
+    temp_tolerance = tolerance;
+}
+
+void Heater::checkAlarms() {
+    if (!alarm_system) return;
+    
+    float temp_error = abs(target_temp - current_temp);
+    
+    // Check if enabled and trying to heat
+    if (enabled && target_temp > 0) {
+        // Check temperature overshoot
+        if (current_temp > target_temp + 5.0) {
+            alarm_system->raiseAlarm(
+                ALARM_TEMP_OVERSHOOT,
+                current_temp > target_temp + 10.0 ? ALARM_ERROR : ALARM_WARNING,
+                current_temp,
+                target_temp + 5.0,
+                "Heater " + String(id) + " overshoot: " + String(current_temp - target_temp, 1) + "°C"
+            );\n        } else {
+            alarm_system->clearAlarm(ALARM_TEMP_OVERSHOOT);
+        }
+        
+        // Check settling timeout (30 seconds to reach target)
+        if (!is_settling && temp_error > temp_tolerance) {
+            is_settling = true;
+            settling_start_time = millis();
+        } else if (is_settling && temp_error <= temp_tolerance) {
+            is_settling = false;
+            alarm_system->clearAlarm(ALARM_TEMP_SETTLING_TIMEOUT);
+        } else if (is_settling && (millis() - settling_start_time > 30000)) {
+            alarm_system->raiseAlarm(
+                ALARM_TEMP_SETTLING_TIMEOUT,
+                ALARM_WARNING,
+                millis() - settling_start_time,
+                30000,
+                "Heater " + String(id) + " settling timeout"
+            );
+        }
+        
+        // Check for oscillation (rapid temperature swings)
+        float temp_variance = 0;
+        float mean_temp = 0;
+        for (int i = 0; i < 20; i++) {
+            mean_temp += temp_history[i];
+        }
+        mean_temp /= 20.0;
+        
+        for (int i = 0; i < 20; i++) {
+            float diff = temp_history[i] - mean_temp;
+            temp_variance += diff * diff;
+        }
+        temp_variance /= 20.0;
+        float std_dev = sqrt(temp_variance);
+        
+        if (std_dev > 3.0) {
+            alarm_system->raiseAlarm(
+                ALARM_TEMP_OSCILLATION,
+                ALARM_WARNING,
+                std_dev,
+                3.0,
+                "Heater " + String(id) + " oscillating: σ=" + String(std_dev, 2) + "°C"
+            );
+        } else {
+            alarm_system->clearAlarm(ALARM_TEMP_OSCILLATION);
+        }
+    }
+    
+    // Check sensor fault (unrealistic readings)
+    if (current_temp < MIN_TEMP_THRESHOLD || current_temp > 500) {
+        alarm_system->raiseAlarm(
+            ALARM_TEMP_SENSOR_FAULT,
+            ALARM_CRITICAL,
+            current_temp,
+            25.0,
+            "Heater " + String(id) + " sensor fault: " + String(current_temp, 1) + "°C"
+        );
+        emergencyShutdown();
+    } else {
+        alarm_system->clearAlarm(ALARM_TEMP_SENSOR_FAULT);
+    }
+    
+    // Thermal runaway detection
+    if (thermal_runaway_detected) {
+        alarm_system->raiseAlarm(
+            ALARM_TEMP_THERMAL_RUNAWAY,
+            ALARM_CRITICAL,
+            current_temp,
+            target_temp,
+            "Heater " + String(id) + " thermal runaway detected!"
+        );
+    } else {
+        alarm_system->clearAlarm(ALARM_TEMP_THERMAL_RUNAWAY);
+    }
+}
+
+float Heater::getTempError() {
+    return target_temp - current_temp;
+}
+
+void Heater::startAutoTune() {
+    if (!pid_tuner) return;
+    
+    // Start auto-tuning using relay feedback method
+    pid_tuner->startAutoTune(TUNING_TYREUS_LUYBEN, &current_temp, &target_temp, &prev_error);
+    
+    Serial.printf("Starting auto-tune for heater %d at %.1f°C\\n", id, target_temp);
 }
 
 void HeaterController::emergencyShutdownAll() {

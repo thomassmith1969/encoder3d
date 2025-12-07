@@ -12,6 +12,8 @@
 
 #include <Arduino.h>
 #include "config.h"
+#include "alarm_system.h"
+#include "pid_tuner.h"
 
 // Thermistor lookup table and calculations
 class Thermistor {
@@ -55,6 +57,16 @@ private:
     
     uint8_t pwm_channel;
     
+    // Alarm and tuning support
+    AlarmSystem* alarm_system;
+    PIDTuner* pid_tuner;
+    float temp_tolerance;
+    unsigned long last_alarm_check;
+    unsigned long settling_start_time;
+    bool is_settling;
+    float temp_history[20];
+    int temp_history_index;
+    
 public:
     Heater(uint8_t heater_id, const HeaterPins& heater_pins, float max_temperature, float p, float i, float d);
     ~Heater();
@@ -75,6 +87,14 @@ public:
     
     void setPID(float p, float i, float d);
     void emergencyShutdown();
+    
+    // Alarm and tuning support
+    void setAlarmSystem(AlarmSystem* alarms);
+    void setPIDTuner(PIDTuner* tuner);
+    void setTempTolerance(float tolerance);
+    void checkAlarms();
+    float getTempError();
+    void startAutoTune();
     
 private:
     float computePID();

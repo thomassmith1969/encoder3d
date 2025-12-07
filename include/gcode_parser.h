@@ -14,6 +14,8 @@
 #include "config.h"
 #include "motor_controller.h"
 #include "heater_controller.h"
+#include "alarm_system.h"
+#include "system_monitor.h"
 
 // G-code command structure
 struct GCodeCommand {
@@ -42,6 +44,8 @@ class GCodeParser {
 private:
     MotorController* motor_controller;
     HeaterController* heater_controller;
+    AlarmSystem* alarm_system;
+    SystemMonitor* system_monitor;
     
     // Parser state
     struct MachineState {
@@ -58,13 +62,15 @@ private:
     } state;
     
     String command_buffer;
-    bool command_ready;
-    
 public:
     GCodeParser(MotorController* motors, HeaterController* heaters);
     
     void begin();
+    void setAlarmSystem(AlarmSystem* alarms);
+    void setSystemMonitor(SystemMonitor* monitor);
     void processLine(String line);
+    bool parseCommand(String line, GCodeCommand& cmd);
+    void executeCommand(const GCodeCommand& cmd);
     bool parseCommand(String line, GCodeCommand& cmd);
     void executeCommand(const GCodeCommand& cmd);
     
@@ -106,9 +112,31 @@ public:
     void handleM22(const GCodeCommand& cmd);   // Release SD card
     void handleM23(const GCodeCommand& cmd);   // Select SD file
     void handleM24(const GCodeCommand& cmd);   // Start/resume SD print
-    void handleM25(const GCodeCommand& cmd);   // Pause SD print
-    void handleM27(const GCodeCommand& cmd);   // Report SD print status
     void handleM30(const GCodeCommand& cmd);   // Delete SD file
+    
+    // Alarm and monitoring commands (M700-M799)
+    void handleM700(const GCodeCommand& cmd);  // Get alarm status
+    void handleM701(const GCodeCommand& cmd);  // Clear all alarms
+    void handleM702(const GCodeCommand& cmd);  // Acknowledge all alarms
+    void handleM703(const GCodeCommand& cmd);  // Set alarm tolerance
+    void handleM704(const GCodeCommand& cmd);  // Get system health
+    
+    // PID tuning commands (M800-M899)
+    void handleM800(const GCodeCommand& cmd);  // Set motor PID
+    void handleM801(const GCodeCommand& cmd);  // Set heater PID
+    void handleM802(const GCodeCommand& cmd);  // Auto-tune motor PID
+    void handleM803(const GCodeCommand& cmd);  // Auto-tune heater PID
+    void handleM804(const GCodeCommand& cmd);  // Load PID preset
+    void handleM805(const GCodeCommand& cmd);  // Save PID preset
+    
+    // Diagnostics (M900-M999)
+    void handleM900(const GCodeCommand& cmd);  // Run full diagnostics
+    void handleM901(const GCodeCommand& cmd);  // Calibrate motors
+    void handleM902(const GCodeCommand& cmd);  // Test motor
+    void handleM903(const GCodeCommand& cmd);  // Test heater
+    void handleM999(const GCodeCommand& cmd);  // Reset controller
+    
+    // Status reportingt GCodeCommand& cmd);   // Delete SD file
     
     // Status reporting
     String getStatusReport();

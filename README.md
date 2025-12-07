@@ -14,18 +14,37 @@ A comprehensive ESP32-based CNC controller firmware for encoder motor-driven 3D 
 - **6-Axis Encoder Motor Control**: Dual X motors, dual Y motors, Z axis, and extruder
 - **Real-time PID Feedback**: Closed-loop control using quadrature encoders
 - **Dual Heater Control**: Hotend and heated bed with PID temperature control
-- **SD Card Storage**: Direct microSD card support for G-code files
+- **SD Card Storage**: Direct microSD card support for G-code files (optional)
+- **LittleFS Support**: Internal flash storage for small G-code files (≤100KB)
 - **Safety Features**: Thermal runaway protection, emergency stop, position limits
 - **Multi-Mode Operation**: 3D Printer, CNC Spindle, and Laser Cutter modes
 
+### Advanced Control Systems
+- **Comprehensive Alarm System**: Real-time monitoring with configurable tolerances
+  - Motor position/velocity error detection
+  - Temperature overshoot/undershoot monitoring
+  - Thermal runaway protection
+  - Stall detection and overspeed protection
+  - System health scoring (0-100%)
+- **Adaptive PID Tuning**: Automatic controller optimization
+  - Multiple tuning methods (Ziegler-Nichols, Tyreus-Luyben, Cohen-Coon)
+  - Auto-tuning via relay feedback test
+  - Continuous adaptive adjustment
+  - Performance metrics tracking
+- **System Health Monitoring**: Centralized diagnostics
+  - Real-time performance tracking
+  - Memory leak detection
+  - CPU usage monitoring
+  - Automated diagnostics (M900)
+
 ### Software Features
-- **G-code Interpreter**: Standard G-code and M-code support
-- **Web Interface**: Modern, responsive web UI for control and monitoring
+- **G-code Interpreter**: Standard G-code and M-code support + advanced commands
+- **Web Interface**: Modern, responsive web UI with Three.js STL viewer
+- **STL Slicer**: Browser-based slicer with configurable parameters
+- **Dual Storage**: Automatic routing (LittleFS for small files, SD for large)
 - **REST API**: HTTP endpoints for integration with external software
 - **WebSocket Support**: Real-time status updates
 - **Telnet Interface**: Traditional command-line G-code interface
-- **SD Card G-code**: Execute files from microSD card (M20-M30 commands)
-- **File Upload**: Upload and execute G-code files via web or SD card
 - **WiFi Connectivity**: Access Point or Station mode
 
 ## Hardware Requirements
@@ -431,6 +450,7 @@ Thanks to all contributors, testers, and users who help improve this project.
 - 💾 [SD_CARD_WIRING.md](SD_CARD_WIRING.md) - SD card installation guide
 - 🚀 [QUICKSTART.md](QUICKSTART.md) - Quick start guide
 - 🏗️ [ARCHITECTURE.md](ARCHITECTURE.md) - System architecture and design
+- 🚨 [docs/ALARM_SYSTEM_GUIDE.md](docs/ALARM_SYSTEM_GUIDE.md) - **Alarm system and PID tuning guide**
 - 🤝 [CONTRIBUTING.md](CONTRIBUTING.md) - Contribution guidelines
 - 📜 [LICENSE](LICENSE) - MIT License text
 - 🏛️ [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) - Third-party library licenses and attributions

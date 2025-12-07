@@ -13,6 +13,8 @@
 #include <Arduino.h>
 #include <Encoder.h>
 #include "config.h"
+#include "alarm_system.h"
+#include "pid_tuner.h"
 
 // PID Controller class
 class PIDController {
@@ -54,6 +56,13 @@ private:
     bool enabled;
     int direction;  // 1 or -1
     
+    // Alarm and tuning support
+    AlarmSystem* alarm_system;
+    PIDTuner* pid_tuner;
+    float position_tolerance;
+    float velocity_tolerance;
+    unsigned long last_alarm_check;
+    
 public:
     Motor(uint8_t motor_id, const MotorPins& motor_pins, float steps_mm, float max_spd, float max_acc);
     ~Motor();
@@ -74,6 +83,14 @@ public:
     
     void resetPosition(float pos = 0.0);
     void emergencyStop();
+    
+    // Alarm and tuning support
+    void setAlarmSystem(AlarmSystem* alarms);
+    void setPIDTuner(PIDTuner* tuner);
+    void setPositionTolerance(float tolerance);
+    void setVelocityTolerance(float tolerance);
+    void checkAlarms();
+    float getPositionError();
     
 private:
     void updateEncoder();

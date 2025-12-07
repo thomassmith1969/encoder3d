@@ -68,7 +68,9 @@ void PIDController::setTunings(float p, float i, float d) {
 Motor::Motor(uint8_t motor_id, const MotorPins& motor_pins, float steps_mm, float max_spd, float max_acc)
     : id(motor_id), pins(motor_pins), steps_per_mm(steps_mm), max_speed(max_spd), max_accel(max_acc),
       current_position(0), target_position(0), current_velocity(0), target_velocity(0),
-      encoder_count(0), last_encoder_count(0), enabled(false), direction(1) {
+      encoder_count(0), last_encoder_count(0), enabled(false), direction(1),
+      alarm_system(nullptr), pid_tuner(nullptr), position_tolerance(0.5), velocity_tolerance(10.0),
+      last_alarm_check(0) {
     
     encoder = new Encoder(pins.enc_a, pins.enc_b);
     pid = new PIDController(MOTOR_PID_KP, MOTOR_PID_KI, MOTOR_PID_KD, PID_OUTPUT_LIMIT);
@@ -118,6 +120,17 @@ void Motor::update() {
     
     // Calculate error
     float position_error = target_position - current_position;
+    
+    // Check alarms periodically (every 100ms)
+    if (alarm_system && (millis() - last_alarm_check > 100)) {
+        checkAlarms();
+        last_alarm_check = millis();
+    }
+    
+    // Update PID tuner if active
+    if (pid_tuner && pid_tuner->isAutoTuning()) {
+        pid_tuner->update();
+    }
     
     // Compute PID output
     float pid_output = pid->compute(target_position, current_position);
@@ -402,6 +415,92 @@ void MotorController::disableAll() {
 void MotorController::home(uint8_t motor_id) {
     // Implement homing routine for specific motor
     // This would typically involve moving until an endstop is triggered
+}
+
+// ============================================================================
+// Motor Alarm and Tuning Support
+// ============================================================================
+
+void Motor::setAlarmSystem(AlarmSystem* alarms) {
+    alarm_system = alarms;
+}
+
+void Motor::setPIDTuner(PIDTuner* tuner) {
+    pid_tuner = tuner;
+}
+
+void Motor::setPositionTolerance(float tolerance) {
+    position_tolerance = tolerance;
+}
+
+void Motor::setVelocityTolerance(float tolerance) {
+    velocity_tolerance = tolerance;
+}
+
+void Motor::checkAlarms() {
+    if (!alarm_system || !enabled) return;
+    
+    float position_error = abs(target_position - current_position);
+    float velocity_error = abs(target_velocity - current_velocity);
+    
+    // Check position tolerance
+    if (position_error > position_tolerance) {
+        String msg = "Motor " + String(id) + " position error: " + String(position_error, 2) + "mm";
+        alarm_system->raiseAlarm(
+            ALARM_MOTOR_POSITION_ERROR,
+            position_error > (position_tolerance * 2) ? ALARM_ERROR : ALARM_WARNING,
+            position_error,
+            position_tolerance,
+            msg
+        );
+    } else {
+        alarm_system->clearAlarm(ALARM_MOTOR_POSITION_ERROR);
+    }
+    
+    // Check velocity tolerance (only if moving)
+    if (abs(target_velocity) > 0.1 && velocity_error > velocity_tolerance) {
+        String msg = "Motor " + String(id) + " velocity error: " + String(velocity_error, 2) + "mm/s";
+        alarm_system->raiseAlarm(
+            ALARM_MOTOR_VELOCITY_ERROR,
+            ALARM_WARNING,
+            velocity_error,
+            velocity_tolerance,
+            msg
+        );
+    } else {
+        alarm_system->clearAlarm(ALARM_MOTOR_VELOCITY_ERROR);
+    }
+    
+    // Check for stall (encoder not moving but should be)
+    if (abs(target_velocity) > 1.0 && abs(current_velocity) < 0.1) {
+        alarm_system->raiseAlarm(
+            ALARM_MOTOR_STALL,
+            ALARM_ERROR,
+            current_velocity,
+            target_velocity,
+            "Motor " + String(id) + " stall detected"
+        );
+    } else {
+        alarm_system->clearAlarm(ALARM_MOTOR_STALL);
+    }
+    
+    // Check for overspeed
+    if (abs(current_velocity) > max_speed) {
+        alarm_system->raiseAlarm(
+            ALARM_MOTOR_OVERSPEED,
+            ALARM_CRITICAL,
+            abs(current_velocity),
+            max_speed,
+            "Motor " + String(id) + " overspeed: " + String(abs(current_velocity), 2) + "mm/s"
+        );
+        emergencyStop();
+    } else {
+        alarm_system->clearAlarm(ALARM_MOTOR_OVERSPEED);
+    }
+}
+
+float Motor::getPositionError() {
+    return target_position - current_position;
 }
 
 void MotorController::homeAll() {

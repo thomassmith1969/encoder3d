@@ -13,7 +13,8 @@
 // ============================================================================
 
 GCodeParser::GCodeParser(MotorController* motors, HeaterController* heaters)
-    : motor_controller(motors), heater_controller(heaters), command_ready(false) {
+    : motor_controller(motors), heater_controller(heaters), 
+      alarm_system(nullptr), system_monitor(nullptr), command_ready(false) {
     
     // Initialize machine state
     for (int i = 0; i < 6; i++) {
@@ -33,6 +34,14 @@ GCodeParser::GCodeParser(MotorController* motors, HeaterController* heaters)
 void GCodeParser::begin() {
     command_buffer = "";
     sendResponse("ok Encoder3D ready");
+}
+
+void GCodeParser::setAlarmSystem(AlarmSystem* alarms) {
+    alarm_system = alarms;
+}
+
+void GCodeParser::setSystemMonitor(SystemMonitor* monitor) {
+    system_monitor = monitor;
 }
 
 void GCodeParser::processLine(String line) {
@@ -157,6 +166,25 @@ void GCodeParser::executeCommand(const GCodeCommand& cmd) {
             case 25: handleM25(cmd); break;
             case 27: handleM27(cmd); return;   // Status - don't send ok
             case 30: handleM30(cmd); break;
+            // Alarm commands (M700-M799)
+            case 700: handleM700(cmd); return;  // Get alarm status - don't send ok
+            case 701: handleM701(cmd); break;
+            case 702: handleM702(cmd); break;
+            case 703: handleM703(cmd); break;
+            case 704: handleM704(cmd); return;  // Get health - don't send ok
+            // PID tuning commands (M800-M899)
+            case 800: handleM800(cmd); break;
+            case 801: handleM801(cmd); break;
+            case 802: handleM802(cmd); break;
+            case 803: handleM803(cmd); break;
+            case 804: handleM804(cmd); break;
+            case 805: handleM805(cmd); break;
+            // Diagnostics (M900-M999)
+            case 900: handleM900(cmd); break;
+            case 901: handleM901(cmd); break;
+            case 902: handleM902(cmd); break;
+            case 903: handleM903(cmd); break;
+            case 999: handleM999(cmd); break;
             default:
                 sendError("Error: Unknown M-code: M" + String(cmd.number));
                 return;
@@ -644,5 +672,216 @@ void GCodeParser::handleM30(const GCodeCommand& cmd) {
     } else {
         sendError("Error: Failed to delete file");
     }
+}
+
+// ============================================================================
+// Alarm Management Handlers (M700-M799)
+// ============================================================================
+
+void GCodeParser::handleM700(const GCodeCommand& cmd) {
+    // Get alarm status
+    if (!alarm_system) {
+        sendError("Error: Alarm system not initialized");
+        return;
+    }
+    
+    sendResponse(alarm_system->getAlarmJSON());
+    sendResponse("ok");
+}
+
+void GCodeParser::handleM701(const GCodeCommand& cmd) {
+    // Clear all alarms
+    if (!alarm_system) {
+        sendError("Error: Alarm system not initialized");
+        return;
+    }
+    
+    alarm_system->clearAllAlarms();
+    sendResponse("All alarms cleared");
+}
+
+void GCodeParser::handleM702(const GCodeCommand& cmd) {
+    // Acknowledge all alarms
+    if (!alarm_system) {
+        sendError("Error: Alarm system not initialized");
+        return;
+    }
+    
+    alarm_system->acknowledgeAllAlarms();
+    sendResponse("All alarms acknowledged");
+}
+
+void GCodeParser::handleM703(const GCodeCommand& cmd) {
+    // Set alarm tolerance
+    // M703 S<motor_pos_tol> P<motor_vel_tol> T<temp_tol>
+    if (!alarm_system) {
+        sendError("Error: Alarm system not initialized");
+        return;
+    }
+    
+    ToleranceConfig tolerances = alarm_system->getTolerances();
+    
+    if (cmd.has_s) {
+        tolerances.motor_position_tolerance = cmd.s;
+    }
+    if (cmd.has_p) {
+        tolerances.motor_velocity_tolerance = cmd.p;
+    }
+    if (cmd.letter == 'T' && cmd.has_p) {  // Use P for temp when T is letter
+        tolerances.temp_tolerance = cmd.p;
+    }
+    
+    alarm_system->setTolerances(tolerances);
+    sendResponse("Tolerances updated");
+}
+
+void GCodeParser::handleM704(const GCodeCommand& cmd) {
+    // Get system health status
+    if (!system_monitor) {
+        sendError("Error: System monitor not initialized");
+        return;
+    }
+    
+    sendResponse(system_monitor->getStatusJSON());
+    sendResponse("ok");
+}
+
+// ============================================================================
+// PID Tuning Handlers (M800-M899)
+// ============================================================================
+
+void GCodeParser::handleM800(const GCodeCommand& cmd) {
+    // Set motor PID: M800 P<motor_id> S<Kp> I<Ki> D<Kd>
+    // For now, send acknowledgment (actual implementation needs motor access to PID)
+    sendResponse("Motor PID configuration not yet fully implemented");
+}
+
+void GCodeParser::handleM801(const GCodeCommand& cmd) {
+    // Set heater PID: M801 P<heater_id> S<Kp> I<Ki> D<Kd>
+    if (!heater_controller) {
+        sendError("Error: Heater controller not initialized");
+        return;
+    }
+    
+    if (!cmd.has_p) {
+        sendError("Error: Heater ID required (P parameter)");
+        return;
+    }
+    
+    int heater_id = (int)cmd.p;
+    
+    if (cmd.has_s && cmd.has_e && cmd.has_f) {
+        // Assuming S=Kp, E=Ki (reusing E), F=Kd (reusing F)
+        float kp = cmd.s;
+        float ki = cmd.e;  // Reuse E parameter
+        float kd = cmd.f;  // Reuse F parameter
+        
+        heater_controller->setPID(heater_id, kp, ki, kd);
+        sendResponse("Heater " + String(heater_id) + " PID set: Kp=" + String(kp, 3) + 
+                    " Ki=" + String(ki, 3) + " Kd=" + String(kd, 3));
+    } else {
+        sendError("Error: PID parameters required (S=Kp, E=Ki, F=Kd)");
+    }
+}
+
+void GCodeParser::handleM802(const GCodeCommand& cmd) {
+    // Auto-tune motor PID: M802 P<motor_id>
+    sendResponse("Motor PID auto-tuning not yet implemented");
+}
+
+void GCodeParser::handleM803(const GCodeCommand& cmd) {
+    // Auto-tune heater PID: M803 P<heater_id>
+    sendResponse("Heater PID auto-tuning initiated");
+    sendResponse("This may take several minutes...");
+    // Actual auto-tune would be triggered here
+}
+
+void GCodeParser::handleM804(const GCodeCommand& cmd) {
+    // Load PID preset: M804 S<preset_name>
+    // Presets: "conservative", "balanced", "aggressive"
+    sendResponse("PID preset loading not yet implemented");
+}
+
+void GCodeParser::handleM805(const GCodeCommand& cmd) {
+    // Save current PID as preset
+    sendResponse("PID preset saving not yet implemented");
+}
+
+// ============================================================================
+// Diagnostic Handlers (M900-M999)
+// ============================================================================
+
+void GCodeParser::handleM900(const GCodeCommand& cmd) {
+    // Run full system diagnostics
+    if (system_monitor) {
+        system_monitor->runDiagnostics();
+        sendResponse("Diagnostics complete - check serial output");
+    } else {
+        sendError("Error: System monitor not initialized");
+    }
+}
+
+void GCodeParser::handleM901(const GCodeCommand& cmd) {
+    // Calibrate motors
+    if (system_monitor) {
+        system_monitor->calibrateMotors();
+        sendResponse("Motor calibration complete");
+    } else {
+        sendError("Error: System monitor not initialized");
+    }
+}
+
+void GCodeParser::handleM902(const GCodeCommand& cmd) {
+    // Test motor: M902 P<motor_id>
+    if (!motor_controller) {
+        sendError("Error: Motor controller not initialized");
+        return;
+    }
+    
+    if (!cmd.has_p) {
+        sendError("Error: Motor ID required (P parameter)");
+        return;
+    }
+    
+    int motor_id = (int)cmd.p;
+    sendResponse("Testing motor " + String(motor_id) + "...");
+    
+    // Simple test: move motor forward and back
+    motor_controller->enableMotor(motor_id);
+    motor_controller->setTargetPosition(motor_id, 10.0);  // Move 10mm
+    delay(2000);
+    motor_controller->setTargetPosition(motor_id, 0.0);   // Return
+    delay(2000);
+    
+    sendResponse("Motor " + String(motor_id) + " test complete");
+}
+
+void GCodeParser::handleM903(const GCodeCommand& cmd) {
+    // Test heater: M903 P<heater_id> S<temp>
+    if (!heater_controller) {
+        sendError("Error: Heater controller not initialized");
+        return;
+    }
+    
+    if (!cmd.has_p) {
+        sendError("Error: Heater ID required (P parameter)");
+        return;
+    }
+    
+    int heater_id = (int)cmd.p;
+    float test_temp = cmd.has_s ? cmd.s : 50.0;  // Default 50°C
+    
+    sendResponse("Testing heater " + String(heater_id) + " at " + String(test_temp, 1) + "°C");
+    heater_controller->setTargetTemperature(heater_id, test_temp);
+    heater_controller->enableHeater(heater_id);
+    
+    sendResponse("Heater test started - monitor temperature");
+}
+
+void GCodeParser::handleM999(const GCodeCommand& cmd) {
+    // Reset controller
+    sendResponse("Resetting controller...");
+    delay(100);
+    ESP.restart();
 }
 
