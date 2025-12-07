@@ -150,8 +150,37 @@ def create_wiring_diagram():
         (13, mosfets[1], "sig", "pwm")
     ]
 
+    # --- Routing Helper ---
+    def draw_angled_wire(dwg, start, end, color, lane_offset=0, side="left"):
+        """
+        Draws an orthogonal wire path.
+        side: 'left' or 'right' relative to the source (ESP32).
+        lane_offset: spacing for the vertical channel.
+        """
+        points = [start]
+        
+        # Channel X coordinate
+        if side == "left":
+            channel_x = start[0] - 20 - (lane_offset * 3)
+        else:
+            channel_x = start[0] + 20 + (lane_offset * 3)
+            
+        # 1. Move horizontally to channel
+        points.append((channel_x, start[1]))
+        
+        # 2. Move vertically to target Y
+        points.append((channel_x, end[1]))
+        
+        # 3. Move horizontally to target
+        points.append(end)
+        
+        # Draw polyline
+        dwg.add(dwg.polyline(points, stroke=color, stroke_width=1.5, fill="none", opacity=0.8))
+
     # Draw Wires
     used_pins = {}
+    left_lane_idx = 0
+    right_lane_idx = 0
     
     # 1. Logic Connections (ESP32 -> Drivers/Encoders)
     for pin, comp, port, type_ in connections:
@@ -172,8 +201,19 @@ def create_wiring_diagram():
         elif type_ == "in1": color = "purple"
         elif type_ == "in2": color = "orange"
         
-        # Draw line
-        dwg.add(dwg.line(start=start, end=end, stroke=color, stroke_width=1, opacity=0.6))
+        # Determine side and lane
+        # Lolin is at x=150, width=60. Center ~180.
+        # Left pins are at x=150. Right pins are at x=210.
+        if start[0] <= 150:
+            side = "left"
+            lane = left_lane_idx
+            left_lane_idx += 1
+        else:
+            side = "right"
+            lane = right_lane_idx
+            right_lane_idx += 1
+            
+        draw_angled_wire(dwg, start, end, color, lane, side)
         
         # Track usage for conflicts
         if pin not in used_pins:
@@ -181,10 +221,7 @@ def create_wiring_diagram():
         used_pins[pin].append(f"{port}")
 
     # 2. Power Connections (Drivers -> Motors)
-    # X: Driver 0 OUT1/OUT2 -> Motor 0 M+/M-
-    # Y: Driver 0 OUT3/OUT4 -> Motor 1 M+/M-
-    # Z: Driver 1 OUT1/OUT2 -> Motor 2 M+/M-
-    # E: Driver 1 OUT3/OUT4 -> Motor 3 M+/M-
+    # Simple vertical routing with small offset
     
     power_connections = [
         (drivers[0], "OUT1", motors[0]["pins"], "M+"), (drivers[0], "OUT2", motors[0]["pins"], "M-"),
@@ -193,10 +230,32 @@ def create_wiring_diagram():
         (drivers[1], "OUT3", motors[3]["pins"], "M+"), (drivers[1], "OUT4", motors[3]["pins"], "M-"),
     ]
 
+    pwr_idx = 0
     for driver, d_port, motor_pins, m_port in power_connections:
         start = driver[d_port]
         end = motor_pins[m_port]
-        dwg.add(dwg.line(start=start, end=end, stroke="orange", stroke_width=2, opacity=0.8))
+        
+        # Route: Out -> Right -> Down -> Left -> In
+        # Driver output is at x + 80
+        # Motor input is at various x
+        
+        points = [start]
+        
+        # Move right a bit to clear terminals
+        mid_x = start[0] + 10 + (pwr_idx % 2) * 5
+        points.append((mid_x, start[1]))
+        
+        # Move down to motor height
+        points.append((mid_x, end[1] - 15))
+        
+        # Move to motor x
+        points.append((end[0], end[1] - 15))
+        
+        # Move down to pin
+        points.append(end)
+        
+        dwg.add(dwg.polyline(points, stroke="orange", stroke_width=2, fill="none", opacity=0.8))
+        pwr_idx += 1
 
     # Highlight Conflicts
     conflict_y = 250
