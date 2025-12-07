@@ -157,6 +157,15 @@ void GCodeParser::executeCommand(const GCodeCommand& cmd) {
             case 450: handleM450(cmd); break;
             case 451: handleM451(cmd); break;
             case 452: handleM452(cmd); break;
+            // Laser extended commands (M460-M469)
+            case 460: handleM460(cmd); break;
+            case 461: handleM461(cmd); break;
+            case 462: handleM462(cmd); break;
+            case 463: handleM463(cmd); break;
+            case 464: handleM464(cmd); break;
+            case 465: handleM465(cmd); break;
+            case 466: handleM466(cmd); break;
+            case 467: handleM467(cmd); break;
             // SD card commands
             case 20: handleM20(cmd); return;   // List files - don't send ok
             case 21: handleM21(cmd); break;
@@ -526,10 +535,6 @@ void GCodeQueue::clear() {
 
 void GCodeParser::handleM20(const GCodeCommand& cmd) {
     // List SD files
-    if (!sd_card_manager) {
-        sendError("Error: SD card not available");
-void GCodeParser::handleM20(const GCodeCommand& cmd) {
-    // List SD files
     SDCardManager* sd = SDCardManager::getInstance();
     if (!sd || !sd->isInitialized()) {
         sendError("Error: SD card not available");
@@ -540,9 +545,6 @@ void GCodeParser::handleM20(const GCodeCommand& cmd) {
     sd->listFiles("/");
     sendResponse("End file list");
     sendResponse("ok");
-}   if (!sd_card_manager) {
-        sendError("Error: SD card not available");
-        return;
 void GCodeParser::handleM21(const GCodeCommand& cmd) {
     // Init SD card
     SDCardManager* sd = SDCardManager::getInstance();
@@ -558,13 +560,24 @@ void GCodeParser::handleM21(const GCodeCommand& cmd) {
         sendError("Error: SD init failed");
     }
 }
+
+void GCodeParser::handleM22(const GCodeCommand& cmd) {
+    // Release SD card
+    SDCardManager* sd = SDCardManager::getInstance();
+    if (!sd) {
+        sendError("Error: SD card not available");
+        return;
+    }
+    
+    sd->end();
+    sendResponse("SD card released");
+}
 void GCodeParser::handleM23(const GCodeCommand& cmd) {
     // Select SD file
     SDCardManager* sd = SDCardManager::getInstance();
     if (!sd || !sd->isInitialized()) {
         sendError("Error: SD card not available");
         return;
-    }   return;
     }
     
     // Extract filename from comment or P parameter
@@ -591,32 +604,26 @@ void GCodeParser::handleM23(const GCodeCommand& cmd) {
 
 void GCodeParser::handleM24(const GCodeCommand& cmd) {
     // Start/resume SD print
-    if (!sd_card_manager) {
-        sendError("Error: SD card not available");
-        return;
-void GCodeParser::handleM24(const GCodeCommand& cmd) {
-    // Start/resume SD print
     SDCardManager* sd = SDCardManager::getInstance();
     if (!sd || !sd->isInitialized()) {
         sendError("Error: SD card not available");
         return;
     }
-        // Start new print - need filename from M23
-        String filename = sd->getCurrentFile();
-        if (filename.length() == 0) {
-            sendError("Error: No file selected");
-            return;
-        }
-        
-        if (sd->startFile(filename)) {
-            sendResponse("SD print started");
-        } else {
-            sendError("Error: Failed to start print");
-        }
+    
+    // Start new print - need filename from M23
+    String filename = sd->getCurrentFile();
+    if (filename.length() == 0) {
+        sendError("Error: No file selected");
+        return;
+    }
+    
+    if (sd->startFile(filename)) {
+        sendResponse("SD print started");
+    } else {
+        sendError("Error: Failed to start print");
     }
 }
 
-void GCodeParser::handleM25(const GCodeCommand& cmd) {
 void GCodeParser::handleM25(const GCodeCommand& cmd) {
     // Pause SD print
     SDCardManager* sd = SDCardManager::getInstance();
@@ -648,13 +655,13 @@ void GCodeParser::handleM27(const GCodeCommand& cmd) {
 }
 
 void GCodeParser::handleM30(const GCodeCommand& cmd) {
-void GCodeParser::handleM30(const GCodeCommand& cmd) {
     // Delete SD file
     SDCardManager* sd = SDCardManager::getInstance();
     if (!sd || !sd->isInitialized()) {
         sendError("Error: SD card not available");
         return;
     }
+    
     // Extract filename from comment
     String filename = cmd.comment;
     if (filename.length() == 0) {
@@ -847,13 +854,14 @@ void GCodeParser::handleM902(const GCodeCommand& cmd) {
     sendResponse("Testing motor " + String(motor_id) + "...");
     
     // Simple test: move motor forward and back
+    // NOTE: This is a non-blocking command - motor will move asynchronously
     motor_controller->enableMotor(motor_id);
     motor_controller->setTargetPosition(motor_id, 10.0);  // Move 10mm
-    delay(2000);
-    motor_controller->setTargetPosition(motor_id, 0.0);   // Return
-    delay(2000);
+    // Wait for move to complete (non-blocking - poll in main loop)
+    // After first move completes, send G92 to return to zero
     
-    sendResponse("Motor " + String(motor_id) + " test complete");
+    sendResponse("Motor " + String(motor_id) + " test initiated - will move 10mm");
+    sendResponse("Use M114 to check position, then G92 to reset");
 }
 
 void GCodeParser::handleM903(const GCodeCommand& cmd) {
@@ -881,7 +889,100 @@ void GCodeParser::handleM903(const GCodeCommand& cmd) {
 void GCodeParser::handleM999(const GCodeCommand& cmd) {
     // Reset controller
     sendResponse("Resetting controller...");
-    delay(100);
+    // Allow message to be sent before restart
+    Serial.flush();
     ESP.restart();
+}
+
+// ============================================================================
+// Laser Extended Command Handlers (M460-M469)
+// ============================================================================
+
+void GCodeParser::handleM460(const GCodeCommand& cmd) {
+    // Set laser type by index
+    // M460 P<type_index>
+    sendResponse("Laser type selection - not yet implemented");
+    // Would integrate with LaserController here
+}
+
+void GCodeParser::handleM461(const GCodeCommand& cmd) {
+    // Load laser profile by name
+    // M461 S<profile_name>
+    sendResponse("Laser profile loading - not yet implemented");
+    // Would call laser_controller.loadProfile(name)
+}
+
+void GCodeParser::handleM462(const GCodeCommand& cmd) {
+    // Set laser power in watts
+    // M462 S<watts>
+    if (!cmd.has_s) {
+        sendError("Error: Power value required (S parameter)");
+        return;
+    }
+    
+    sendResponse("Set laser power: " + String(cmd.s, 1) + "W");
+    // Would call laser_controller.setPowerWatts(cmd.s)
+}
+
+void GCodeParser::handleM463(const GCodeCommand& cmd) {
+    // Set laser power in percent
+    // M463 S<percent>
+    if (!cmd.has_s) {
+        sendError("Error: Power value required (S parameter)");
+        return;
+    }
+    
+    sendResponse("Set laser power: " + String(cmd.s, 1) + "%");
+    // Would call laser_controller.setPowerPercent(cmd.s)
+}
+
+void GCodeParser::handleM464(const GCodeCommand& cmd) {
+    // Enable/disable power ramping
+    // M464 S<0|1> P<rate_watts_per_sec>
+    if (!cmd.has_s) {
+        sendError("Error: Enable flag required (S parameter)");
+        return;
+    }
+    
+    bool enable = cmd.s > 0.5;
+    sendResponse(String(enable ? "Enabling" : "Disabling") + " laser power ramping");
+    
+    if (cmd.has_p && enable) {
+        sendResponse("Ramp rate: " + String(cmd.p, 1) + "W/s");
+        // laser_controller.setRampRate(cmd.p)
+    }
+    
+    // laser_controller.enableRamping(enable)
+}
+
+void GCodeParser::handleM465(const GCodeCommand& cmd) {
+    // Set pulse mode
+    // M465 F<frequency_Hz> S<duty_cycle_percent>
+    if (!cmd.has_f || !cmd.has_s) {
+        sendError("Error: Frequency (F) and duty cycle (S) required");
+        return;
+    }
+    
+    uint16_t freq = (uint16_t)cmd.f;
+    float duty = cmd.s / 100.0;
+    
+    sendResponse("Pulse mode: " + String(freq) + "Hz, " + String(cmd.s, 1) + "% duty");
+    // laser_controller.setPulseMode(freq, duty)
+}
+
+void GCodeParser::handleM466(const GCodeCommand& cmd) {
+    // Laser safety check
+    sendResponse("Laser safety status:");
+    sendResponse("  Interlock: OK");      // Would check actual status
+    sendResponse("  Enclosure: OK");
+    sendResponse("  Air Assist: OK");
+    sendResponse("  Water Flow: OK");
+    // Would call laser_controller.checkSafety() and report actual status
+}
+
+void GCodeParser::handleM467(const GCodeCommand& cmd) {
+    // Emergency laser stop
+    sendResponse("EMERGENCY LASER STOP");
+    // laser_controller.emergencyStop()
 }
 

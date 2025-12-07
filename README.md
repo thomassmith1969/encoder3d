@@ -450,7 +450,10 @@ Thanks to all contributors, testers, and users who help improve this project.
 - 💾 [SD_CARD_WIRING.md](SD_CARD_WIRING.md) - SD card installation guide
 - 🚀 [QUICKSTART.md](QUICKSTART.md) - Quick start guide
 - 🏗️ [ARCHITECTURE.md](ARCHITECTURE.md) - System architecture and design
-- 🚨 [docs/ALARM_SYSTEM_GUIDE.md](docs/ALARM_SYSTEM_GUIDE.md) - **Alarm system and PID tuning guide**
+- 🚨 [docs/ALARM_SYSTEM_GUIDE.md](docs/ALARM_SYSTEM_GUIDE.md) - Alarm system and PID tuning guide
+- 🔦 [docs/LASER_GUIDE.md](docs/LASER_GUIDE.md) - **Comprehensive laser controller guide**
+- 🛠️ [docs/TOOL_GUIDE.md](docs/TOOL_GUIDE.md) - **Complete CNC tool support guide**
+- 📋 [docs/GCODE_REFERENCE.md](docs/GCODE_REFERENCE.md) - G-code command reference
 - 🤝 [CONTRIBUTING.md](CONTRIBUTING.md) - Contribution guidelines
 - 📜 [LICENSE](LICENSE) - MIT License text
 - 🏛️ [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) - Third-party library licenses and attributions

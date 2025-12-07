@@ -106,6 +106,16 @@ public:
     void handleM451(const GCodeCommand& cmd);  // CNC mode
     void handleM452(const GCodeCommand& cmd);  // Laser mode
     
+    // Laser extended commands (M460-M469)
+    void handleM460(const GCodeCommand& cmd);  // Set laser type
+    void handleM461(const GCodeCommand& cmd);  // Load laser profile
+    void handleM462(const GCodeCommand& cmd);  // Set laser power (watts)
+    void handleM463(const GCodeCommand& cmd);  // Set laser power (percent)
+    void handleM464(const GCodeCommand& cmd);  // Enable/disable ramping
+    void handleM465(const GCodeCommand& cmd);  // Set pulse mode
+    void handleM466(const GCodeCommand& cmd);  // Laser safety check
+    void handleM467(const GCodeCommand& cmd);  // Emergency laser stop
+    
     // SD card commands
     void handleM20(const GCodeCommand& cmd);   // List SD files
     void handleM21(const GCodeCommand& cmd);   // Init SD card

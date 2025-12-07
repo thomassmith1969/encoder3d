@@ -165,16 +165,41 @@ const HeaterPins HEATER_PINS[NUM_HEATERS] = {
 #define COMMAND_QUEUE_SIZE 32
 
 // ============================================================================
-// SPINDLE/LASER CONFIGURATION (for CNC mode)
+// SPINDLE/LASER CONFIGURATION (for CNC/Laser modes)
 // ============================================================================
 
+// Spindle pins
 #define SPINDLE_PWM_PIN 32
 #define SPINDLE_DIR_PIN 33
 #define SPINDLE_ENABLE_PIN 14
-#define LASER_PWM_PIN 32
 
 #define MAX_SPINDLE_RPM 24000
 #define MIN_SPINDLE_RPM 0
+
+// Laser pins
+#define LASER_PWM_PIN 32        // Main PWM control
+#define LASER_ENABLE_PIN 14     // Enable/disable
+#define LASER_ANALOG_PIN 25     // Optional 0-10V analog (DAC)
+#define LASER_TTL_PIN 255       // Optional TTL control (255 = not used)
+
+// Laser safety pins (255 = not used)
+#define LASER_INTERLOCK_PIN 255     // Hardware interlock switch
+#define LASER_ENCLOSURE_PIN 255     // Enclosure door sensor
+#define LASER_AIR_ASSIST_PIN 255    // Air assist flow sensor
+#define LASER_WATER_FLOW_PIN 255    // Water cooling flow sensor
+
+// Default laser type (see laser_controller.h for options)
+// Options: CO2_40W, CO2_100W, DIODE_BLUE_5W, DIODE_BLUE_10W, DIODE_BLUE_20W,
+//          DIODE_RED_500MW, FIBER_20W, FIBER_50W, WELDER_1000W, WELDER_2000W
+#define DEFAULT_LASER_PROFILE "DIODE_BLUE_5W"
+
+// Laser safety defaults
+#define LASER_INTERLOCK_ENABLED false
+#define LASER_ENCLOSURE_REQUIRED false
+#define LASER_AIR_ASSIST_REQUIRED false
+#define LASER_WATER_COOLING_REQUIRED false
+#define LASER_MAX_DUTY_CYCLE 1.0        // 100%
+#define LASER_MAX_CONTINUOUS_TIME 60000  // 60 seconds
 
 // ============================================================================
 // OPERATIONAL MODES
