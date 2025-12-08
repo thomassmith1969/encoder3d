@@ -9,6 +9,7 @@
 #include <WiFi.h>
 #include <DNSServer.h>
 #include <Preferences.h>
+#include <ESPmDNS.h>
 #include "config.h"
 #include "thermal.h"
 
@@ -20,12 +21,16 @@ private:
     WebServer* server;
     WebSocketsServer* ws;
     DNSServer* dnsServer;
+    WiFiServer* telnetServer; // Telnet Server
+    WiFiClient telnetClient;  // Single Telnet Client
     ThermalManager* thermal;
     StreamBufferHandle_t* gcodeStream;
     
     bool isAPMode;
+    String deviceHostname;
 
     void setupRoutes();
+    void handleTelnet(); // Handle Telnet Logic
     void setupFileSystem();
     void setupWiFi();
     void handleUpload();
@@ -36,6 +41,7 @@ public:
     void begin();
     void update();
     void broadcastStatus(float x, float y, float z, float e);
+    void broadcastError(String message);
 };
 
 #endif

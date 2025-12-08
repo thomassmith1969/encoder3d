@@ -3,10 +3,36 @@ const ws = new WebSocket('ws://' + window.location.hostname + ':81/');
 
 ws.onopen = function() {
     console.log('WebSocket Connected');
+    const statusEl = document.getElementById('ws-status');
+    if(statusEl) {
+        statusEl.innerText = '(Connected)';
+        statusEl.style.color = '#4ec9b0';
+    }
+};
+
+ws.onclose = function() {
+    console.log('WebSocket Disconnected');
+    const statusEl = document.getElementById('ws-status');
+    if(statusEl) {
+        statusEl.innerText = '(Disconnected)';
+        statusEl.style.color = '#f48771';
+    }
 };
 
 ws.onmessage = function(event) {
     const data = JSON.parse(event.data);
+
+    if (data.error) {
+        console.error("System Error:", data.error);
+        const statusEl = document.getElementById('ws-status');
+        if(statusEl) {
+            statusEl.innerText = '(ERROR: ' + data.error + ')';
+            statusEl.style.color = '#f48771';
+        }
+        alert("SYSTEM HALTED: " + data.error);
+        return;
+    }
+
     if (data.x !== undefined) {
         document.getElementById('pos-x').innerText = data.x.toFixed(2);
         document.getElementById('pos-y').innerText = data.y.toFixed(2);
@@ -52,7 +78,7 @@ function uploadGCode() {
 }
 
 // --- Three.js Visualizer ---
-let scene, camera, renderer, toolhead;
+let scene, camera, renderer, toolhead, controls;
 
 function initVisualizer() {
     const container = document.getElementById('viewer-container');
@@ -72,6 +98,14 @@ function initVisualizer() {
     renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(container.clientWidth, container.clientHeight);
     container.appendChild(renderer.domElement);
+
+    // Controls
+    if (typeof THREE.OrbitControls !== 'undefined') {
+        controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.25;
+        controls.enableZoom = true;
+    }
     
     // Toolhead (Cone)
     const geometry = new THREE.ConeGeometry(5, 20, 32);
@@ -85,6 +119,18 @@ function initVisualizer() {
     scene.add(light);
     
     animate();
+    
+    // Handle Window Resize
+    window.addEventListener('resize', onWindowResize, false);
+}
+
+function onWindowResize() {
+    const container = document.getElementById('viewer-container');
+    if (camera && renderer && container) {
+        camera.aspect = container.clientWidth / container.clientHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(container.clientWidth, container.clientHeight);
+    }
 }
 
 function updateVisualizer(x, y, z) {
@@ -95,8 +141,12 @@ function updateVisualizer(x, y, z) {
 
 function animate() {
     requestAnimationFrame(animate);
+    if (controls) controls.update();
     renderer.render(scene, camera);
 }
+
+// Initialize on load
+window.addEventListener('load', initVisualizer);
 
 // Handle Resize
 window.addEventListener('resize', () => {

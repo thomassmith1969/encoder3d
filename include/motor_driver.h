@@ -34,6 +34,7 @@ public:
             // FORWARD: PWM on Pin A, Ground Pin B
             if (attachedPin == 1) {
                 ledcDetach(pinB);
+                pinMode(pinB, OUTPUT); // Ensure it's back to GPIO
                 attachedPin = -1;
             }
             digitalWrite(pinB, LOW);
@@ -49,6 +50,7 @@ public:
             // REVERSE: PWM on Pin B, Ground Pin A
             if (attachedPin == 0) {
                 ledcDetach(pinA);
+                pinMode(pinA, OUTPUT); // Ensure it's back to GPIO
                 attachedPin = -1;
             }
             digitalWrite(pinA, LOW);
@@ -64,10 +66,12 @@ public:
             // STOP: Ground both
             if (attachedPin == 0) {
                 ledcDetach(pinA);
+                pinMode(pinA, OUTPUT); // Ensure it's back to GPIO
                 attachedPin = -1;
             }
             if (attachedPin == 1) {
                 ledcDetach(pinB);
+                pinMode(pinB, OUTPUT); // Ensure it's back to GPIO
                 attachedPin = -1;
             }
             digitalWrite(pinA, LOW);

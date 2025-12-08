@@ -30,6 +30,10 @@ volatile long encY = 0;
 volatile long encZ = 0;
 volatile long encE = 0;
 
+// --- SYSTEM STATE ---
+volatile bool isHalted = false;
+String haltReason = "";
+
 void IRAM_ATTR isrX() {
     if (digitalRead(PIN_X_ENC_A) == digitalRead(PIN_X_ENC_B)) encX = encX + 1; else encX = encX - 1;
 }
@@ -59,7 +63,11 @@ void networkTask(void *pvParameters) {
         // Broadcast Status (e.g., every 100ms)
         static long lastStatus = 0;
         if (millis() - lastStatus > 100) {
-            webServer->broadcastStatus(encX, encY, encZ, encE); // Send raw encoder counts for now
+            if (isHalted) {
+                webServer->broadcastError(haltReason);
+            } else {
+                webServer->broadcastStatus(encX, encY, encZ, encE); // Send raw encoder counts for now
+            }
             lastStatus = millis();
         }
 
@@ -83,6 +91,8 @@ void thermalTask(void *pvParameters) {
 // Core 1: Motion Control
 struct MotionCommand {
     long targetX, targetY, targetZ, targetE;
+    bool isRelative;
+    bool isHoming;
 };
 
 void parserTask(void *pvParameters) {
@@ -90,6 +100,8 @@ void parserTask(void *pvParameters) {
     MotionCommand cmd;
     // Initialize targets to 0
     cmd.targetX = 0; cmd.targetY = 0; cmd.targetZ = 0; cmd.targetE = 0;
+    cmd.isRelative = true; // Default to relative for jog buttons
+    cmd.isHoming = false;
 
     // Wait for stream to be initialized
     while (gcodeStream == NULL || motionQueue == NULL) {
@@ -99,18 +111,67 @@ void parserTask(void *pvParameters) {
     while (true) {
         size_t bytes = xStreamBufferReceive(gcodeStream, buffer, 64, portMAX_DELAY);
         if (bytes > 0) {
-            // TODO: Real G-Code Parsing
-            // Simple test: "X1000" moves X to 1000
-            if (buffer[0] == 'X') {
-                cmd.targetX = atol(&buffer[1]);
+            buffer[bytes] = '\0'; // Ensure null termination
+            String line = String(buffer);
+            line.trim();
+            
+            if (line.length() == 0) continue;
+
+            // Parse G-Code
+            if (line.startsWith("G1") || line.startsWith("G0")) {
+                // Linear Move
+                cmd.isHoming = false;
+                
+                // Parse X
+                int xIdx = line.indexOf('X');
+                if (xIdx != -1) {
+                    cmd.targetX = line.substring(xIdx + 1).toInt();
+                } else {
+                    cmd.targetX = 0; // No change if relative, or 0 if absolute (needs state tracking)
+                }
+
+                // Parse Y
+                int yIdx = line.indexOf('Y');
+                if (yIdx != -1) {
+                    cmd.targetY = line.substring(yIdx + 1).toInt();
+                } else {
+                    cmd.targetY = 0;
+                }
+
+                // Parse Z
+                int zIdx = line.indexOf('Z');
+                if (zIdx != -1) {
+                    cmd.targetZ = line.substring(zIdx + 1).toInt();
+                } else {
+                    cmd.targetZ = 0;
+                }
+
+                // Parse E
+                int eIdx = line.indexOf('E');
+                if (eIdx != -1) {
+                    cmd.targetE = line.substring(eIdx + 1).toInt();
+                } else {
+                    cmd.targetE = 0;
+                }
+
                 xQueueSend(motionQueue, &cmd, portMAX_DELAY);
+            }
+            else if (line.startsWith("G28")) {
+                // Homing (Fake for now - just reset encoders)
+                cmd.isHoming = true;
+                xQueueSend(motionQueue, &cmd, portMAX_DELAY);
+            }
+            else if (line.startsWith("M104") || line.startsWith("M140")) {
+                // Temp commands (TODO: Send to Thermal Task)
             }
         }
     }
 }
 
 void controlTask(void *pvParameters) {
-    MotionCommand currentTarget = {0, 0, 0, 0};
+    MotionCommand currentTarget = {0, 0, 0, 0, false, false};
+    long setpointX = 0, setpointY = 0, setpointZ = 0, setpointE = 0;
+    
     TickType_t xLastWakeTime = xTaskGetTickCount();
     const TickType_t xFrequency = 1; // 1ms = 1kHz
 
@@ -120,22 +181,66 @@ void controlTask(void *pvParameters) {
     }
 
     while (true) {
+        if (isHalted) {
+            // Stop all motors if halted
+            motorX.setSpeed(0);
+            motorY.setSpeed(0);
+            motorZ.setSpeed(0);
+            motorE.setSpeed(0);
+            vTaskDelay(100 / portTICK_PERIOD_MS);
+            continue;
+        }
+
         // Check for new target
-        if (xQueueReceive(motionQueue, &currentTarget, 0) == pdTRUE) {
-            // New target received
+        MotionCommand newCmd;
+        if (xQueueReceive(motionQueue, &newCmd, 0) == pdTRUE) {
+            if (newCmd.isHoming) {
+                // Reset Encoders
+                encX = 0; encY = 0; encZ = 0; encE = 0;
+                setpointX = 0; setpointY = 0; setpointZ = 0; setpointE = 0;
+                pidX.reset(); pidY.reset(); pidZ.reset(); pidE.reset();
+            } else {
+                // Update Setpoints
+                // Note: The frontend sends "G1 X10" for jog. 
+                // If we assume relative mode for jogs:
+                setpointX += newCmd.targetX * 100; // Scale factor for steps/mm? 
+                setpointY += newCmd.targetY * 100; // Let's assume 100 counts per unit for now
+                setpointZ += newCmd.targetZ * 100;
+                setpointE += newCmd.targetE * 100;
+            }
         }
 
         // PID Loops
-        int outX = pidX.compute(currentTarget.targetX, encX);
-        int outY = pidY.compute(currentTarget.targetY, encY);
-        int outZ = pidZ.compute(currentTarget.targetZ, encZ);
-        int outE = pidE.compute(currentTarget.targetE, encE);
+        int outX = pidX.compute(setpointX, encX);
+        int outY = pidY.compute(setpointY, encY);
+        int outZ = pidZ.compute(setpointZ, encZ);
+        int outE = pidE.compute(setpointE, encE);
+
+        // Check for Following Error (Stall Detection)
+        if (abs(setpointX - encX) > MAX_FOLLOWING_ERROR) {
+            isHalted = true;
+            haltReason = "X Axis Stall Detected";
+        }
+        if (abs(setpointY - encY) > MAX_FOLLOWING_ERROR) {
+            isHalted = true;
+            haltReason = "Y Axis Stall Detected";
+        }
+        if (abs(setpointZ - encZ) > MAX_FOLLOWING_ERROR) {
+            isHalted = true;
+            haltReason = "Z Axis Stall Detected";
+        }
+        if (abs(setpointE - encE) > MAX_FOLLOWING_ERROR) {
+            isHalted = true;
+            haltReason = "E Axis Stall Detected";
+        }
 
         // Drive Motors
-        motorX.setSpeed(outX);
-        motorY.setSpeed(outY);
-        motorZ.setSpeed(outZ);
-        motorE.setSpeed(outE);
+        if (!isHalted) {
+            motorX.setSpeed(outX);
+            motorY.setSpeed(outY);
+            motorZ.setSpeed(outZ);
+            motorE.setSpeed(outE);
+        }
 
         vTaskDelayUntil(&xLastWakeTime, xFrequency);
     }
@@ -148,11 +253,11 @@ void setup() {
     motorX.begin(); motorY.begin(); motorZ.begin(); motorE.begin();
     thermal.begin();
 
-    // Init Encoders
-    pinMode(PIN_X_ENC_A, INPUT); pinMode(PIN_X_ENC_B, INPUT);
-    pinMode(PIN_Y_ENC_A, INPUT); pinMode(PIN_Y_ENC_B, INPUT);
-    pinMode(PIN_Z_ENC_A, INPUT); pinMode(PIN_Z_ENC_B, INPUT);
-    pinMode(PIN_E_ENC_A, INPUT); pinMode(PIN_E_ENC_B, INPUT);
+    // Init Encoders (Use PULLUP to prevent floating noise)
+    pinMode(PIN_X_ENC_A, INPUT_PULLUP); pinMode(PIN_X_ENC_B, INPUT_PULLUP);
+    pinMode(PIN_Y_ENC_A, INPUT_PULLUP); pinMode(PIN_Y_ENC_B, INPUT_PULLUP);
+    pinMode(PIN_Z_ENC_A, INPUT_PULLUP); pinMode(PIN_Z_ENC_B, INPUT_PULLUP);
+    pinMode(PIN_E_ENC_A, INPUT_PULLUP); pinMode(PIN_E_ENC_B, INPUT_PULLUP);
 
     attachInterrupt(digitalPinToInterrupt(PIN_X_ENC_A), isrX, CHANGE);
     attachInterrupt(digitalPinToInterrupt(PIN_Y_ENC_A), isrY, CHANGE);

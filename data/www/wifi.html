@@ -5,46 +5,148 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Encoder3D WiFi Setup</title>
     <style>
-        body { font-family: sans-serif; background: #1e1e1e; color: #e0e0e0; padding: 20px; }
-        .container { max-width: 400px; margin: 0 auto; background: #2d2d30; padding: 20px; border-radius: 8px; }
-        input { width: 100%; padding: 8px; margin: 5px 0; background: #3c3c3c; border: 1px solid #555; color: white; }
-        button { width: 100%; padding: 10px; background: #0e639c; color: white; border: none; cursor: pointer; margin-top: 10px; }
-        button:hover { background: #1177bb; }
-        #networks { margin-top: 20px; }
-        .network { padding: 10px; border-bottom: 1px solid #444; cursor: pointer; }
+        body { font-family: 'Segoe UI', sans-serif; background: #1e1e1e; color: #e0e0e0; padding: 20px; display: flex; justify-content: center; }
+        .container { width: 100%; max-width: 400px; background: #2d2d30; padding: 25px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
+        h1 { text-align: center; color: #007acc; margin-top: 0; }
+        label { display: block; margin-top: 15px; font-size: 0.9em; color: #aaa; }
+        input[type="text"], input[type="password"] { 
+            width: 100%; padding: 10px; margin-top: 5px; 
+            background: #3c3c3c; border: 1px solid #555; color: white; border-radius: 4px; box-sizing: border-box;
+        }
+        input:focus { border-color: #007acc; outline: none; }
+        
+        .btn { width: 100%; padding: 12px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; margin-top: 20px; transition: background 0.2s; }
+        .btn-primary { background: #0e639c; color: white; }
+        .btn-primary:hover { background: #1177bb; }
+        .btn-secondary { background: #3c3c3c; color: #ccc; margin-top: 10px; }
+        .btn-secondary:hover { background: #4c4c4c; }
+
+        #networks { margin-top: 20px; max-height: 200px; overflow-y: auto; border: 1px solid #444; border-radius: 4px; display: none; }
+        .network { padding: 10px; border-bottom: 1px solid #444; cursor: pointer; display: flex; justify-content: space-between; }
         .network:hover { background: #3c3c3c; }
+        .network:last-child { border-bottom: none; }
+        
+        .toggle-password { margin-top: 5px; display: flex; align-items: center; font-size: 0.8em; cursor: pointer; }
+        .toggle-password input { width: auto; margin-right: 5px; }
+
+        #status { margin-top: 15px; padding: 10px; border-radius: 4px; display: none; text-align: center; }
+        .success { background: #1e3a1e; color: #4ec9b0; border: 1px solid #2d5a2d; }
+        .error { background: #3a1e1e; color: #f48771; border: 1px solid #5a2d2d; }
+        .loading { color: #aaa; font-style: italic; }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>WiFi Setup</h1>
-        <form action="/api/wifi/save" method="POST">
-            <label>SSID</label>
-            <input type="text" name="ssid" id="ssid" required>
+        
+        <div id="status"></div>
+
+        <form id="wifiForm" action="/api/wifi/save" method="POST" onsubmit="saveWiFi(event)">
+            <label>Device Name (Hostname)</label>
+            <input type="text" name="hostname" id="hostname" placeholder="encoder3d">
+
+            <label>Network Name (SSID)</label>
+            <input type="text" name="ssid" id="ssid" required placeholder="Select or type...">
+            
             <label>Password</label>
-            <input type="password" name="pass" id="pass">
-            <button type="submit">Connect</button>
+            <input type="password" name="pass" id="pass" placeholder="Enter password">
+            
+            <label class="toggle-password">
+                <input type="checkbox" onclick="togglePass()"> Show Password
+            </label>
+
+            <button type="submit" class="btn btn-primary" id="connectBtn">Save & Connect</button>
         </form>
-        <button onclick="scanNetworks()">Scan Networks</button>
+        
+        <button onclick="scanNetworks()" class="btn btn-secondary">Scan Networks</button>
         <div id="networks"></div>
     </div>
 
     <script>
+        // Load current settings
+        fetch('/api/status')
+            .then(res => res.json())
+            .then(data => {
+                if(data.hostname) {
+                    document.getElementById('hostname').value = data.hostname;
+                }
+            });
+
+        function togglePass() {
+            const x = document.getElementById("pass");
+            x.type = x.type === "password" ? "text" : "password";
+        }
+
+        function showStatus(msg, type) {
+            const el = document.getElementById('status');
+            el.style.display = 'block';
+            el.className = type;
+            el.innerHTML = msg;
+        }
+
         function scanNetworks() {
-            document.getElementById('networks').innerHTML = 'Scanning...';
+            const list = document.getElementById('networks');
+            list.style.display = 'block';
+            list.innerHTML = '<div class="network loading">Scanning...</div>';
+            
             fetch('/api/wifi/scan')
-                .then(response => response.json())
+                .then(res => res.json())
                 .then(data => {
-                    const div = document.getElementById('networks');
-                    div.innerHTML = '';
+                    list.innerHTML = '';
+                    if(data.length === 0) {
+                        list.innerHTML = '<div class="network">No networks found</div>';
+                        return;
+                    }
+                    data.sort((a, b) => b.rssi - a.rssi);
                     data.forEach(net => {
                         const el = document.createElement('div');
                         el.className = 'network';
-                        el.innerText = `${net.ssid} (${net.rssi} dBm) ${net.secure ? '🔒' : ''}`;
-                        el.onclick = () => document.getElementById('ssid').value = net.ssid;
-                        div.appendChild(el);
+                        el.innerHTML = `<span>${net.ssid}</span> <span style="color:#888">${net.rssi}dBm ${net.secure ? '🔒' : ''}</span>`;
+                        el.onclick = () => {
+                            document.getElementById('ssid').value = net.ssid;
+                            document.getElementById('pass').focus();
+                        };
+                        list.appendChild(el);
                     });
+                })
+                .catch(err => {
+                    list.innerHTML = '<div class="network error">Scan failed</div>';
                 });
+        }
+
+        function saveWiFi(e) {
+            e.preventDefault();
+            const btn = document.getElementById('connectBtn');
+            const ssid = document.getElementById('ssid').value;
+            const pass = document.getElementById('pass').value;
+            const hostname = document.getElementById('hostname').value;
+            
+            btn.disabled = true;
+            btn.innerText = 'Connecting...';
+            showStatus('Attempting to connect... This may take 10 seconds.', 'loading');
+
+            const params = new URLSearchParams();
+            params.append('ssid', ssid);
+            params.append('pass', pass);
+            params.append('hostname', hostname);
+
+            fetch('/api/wifi/save', {
+                method: 'POST',
+                body: params
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    showStatus(`<strong>Connected!</strong><br>IP: <a href="http://${data.ip}" style="color:#fff">${data.ip}</a><br>Hostname: <a href="http://${data.hostname}" style="color:#fff">${data.hostname}</a><br>Rebooting...`, 'success');
+                } else {
+                    showStatus(`Error: ${data.message}`, 'error');
+                    btn.disabled = false;
+                    btn.innerText = 'Connect';
+                }
+            })
+            .catch(err => {
+                showStatus('Connection lost. Device may be rebooting. Check your new IP.', 'loading');
+            });
         }
     </script>
 </body>

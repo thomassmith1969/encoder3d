@@ -5,6 +5,7 @@ WebServerManager::WebServerManager(ThermalManager* t, StreamBufferHandle_t* stre
     gcodeStream = stream;
     server = new WebServer(80);
     ws = new WebSocketsServer(81);
+    telnetServer = new WiFiServer(23); // Telnet Port
     dnsServer = new DNSServer();
     isAPMode = false;
 }
@@ -20,6 +21,8 @@ void WebServerManager::begin() {
     });
     
     server->begin();
+    telnetServer->begin();
+    telnetServer->setNoDelay(true);
 }
 
 void WebServerManager::update() {
@@ -28,6 +31,31 @@ void WebServerManager::update() {
     }
     server->handleClient();
     ws->loop();
+    handleTelnet();
+}
+
+void WebServerManager::handleTelnet() {
+    // Check for new clients
+    if (telnetServer->hasClient()) {
+        if (!telnetClient || !telnetClient.connected()) {
+            if (telnetClient) telnetClient.stop();
+            telnetClient = telnetServer->available();
+            telnetClient.println("Encoder3D Telnet Connected");
+            telnetClient.flush();
+        } else {
+            // Reject multiple clients
+            WiFiClient reject = telnetServer->available();
+            reject.stop();
+        }
+    }
+
+    // Read Data
+    if (telnetClient && telnetClient.connected() && telnetClient.available()) {
+        while (telnetClient.available()) {
+            char c = telnetClient.read();
+            xStreamBufferSend(*gcodeStream, &c, 1, 0);
+        }
+    }
 }
 
 void WebServerManager::setupWiFi() {
@@ -35,11 +63,13 @@ void WebServerManager::setupWiFi() {
     prefs.begin("wifi", true); // Read-only
     String ssid = prefs.getString("ssid", "");
     String pass = prefs.getString("pass", "");
+    deviceHostname = prefs.getString("hostname", "encoder3d");
     prefs.end();
 
     if (ssid.length() > 0) {
         Serial.print("Connecting to "); Serial.println(ssid);
         WiFi.mode(WIFI_STA);
+        WiFi.setHostname(deviceHostname.c_str());
         WiFi.begin(ssid.c_str(), pass.c_str());
         
         // Wait up to 10s for connection
@@ -53,6 +83,12 @@ void WebServerManager::setupWiFi() {
         if (WiFi.status() == WL_CONNECTED) {
             Serial.println("\nConnected! IP: " + WiFi.localIP().toString());
             isAPMode = false;
+            
+            // Start mDNS after connection
+            if (MDNS.begin(deviceHostname.c_str())) {
+                Serial.println("MDNS responder started: " + deviceHostname);
+                MDNS.addService("http", "tcp", 80);
+            }
             return;
         }
     }
@@ -60,8 +96,14 @@ void WebServerManager::setupWiFi() {
     // Fallback to AP Mode
     Serial.println("\nStarting AP Mode...");
     WiFi.mode(WIFI_AP);
-    WiFi.softAP("Encoder3D_Setup");
+    WiFi.softAP(deviceHostname.c_str());
     Serial.println("AP IP: " + WiFi.softAPIP().toString());
+    
+    // Start mDNS in AP Mode
+    if (MDNS.begin(deviceHostname.c_str())) {
+        Serial.println("MDNS responder started: " + deviceHostname);
+        MDNS.addService("http", "tcp", 80);
+    }
     
     // Start DNS Server for Captive Portal (Redirect all to AP IP)
     dnsServer->start(53, "*", WiFi.softAPIP());
@@ -95,14 +137,48 @@ void WebServerManager::setupRoutes() {
     // API: Save WiFi (Always available)
     server->on("/api/wifi/save", HTTP_POST, [this]() {
         if (server->hasArg("ssid") && server->hasArg("pass")) {
+            String ssid = server->arg("ssid");
+            String pass = server->arg("pass");
+            String hostname = server->hasArg("hostname") ? server->arg("hostname") : "encoder3d";
+
+            // Save credentials
             Preferences prefs;
-            prefs.begin("wifi", false); // Read-write
-            prefs.putString("ssid", server->arg("ssid"));
-            prefs.putString("pass", server->arg("pass"));
+            prefs.begin("wifi", false);
+            prefs.putString("ssid", ssid);
+            prefs.putString("pass", pass);
+            prefs.putString("hostname", hostname);
             prefs.end();
-            server->send(200, "text/plain", "Saved. Rebooting...");
-            delay(1000);
-            ESP.restart();
+
+            // Attempt connection to verify and get IP
+            WiFi.mode(WIFI_AP_STA); // Keep AP alive
+            WiFi.setHostname(hostname.c_str());
+            WiFi.begin(ssid.c_str(), pass.c_str());
+            
+            // Wait up to 10s
+            unsigned long start = millis();
+            while (WiFi.status() != WL_CONNECTED && millis() - start < 10000) {
+                delay(100);
+            }
+
+            JsonDocument doc;
+            if (WiFi.status() == WL_CONNECTED) {
+                doc["success"] = true;
+                doc["ip"] = WiFi.localIP().toString();
+                doc["hostname"] = hostname + ".local";
+                String output;
+                serializeJson(doc, output);
+                server->send(200, "application/json", output);
+                
+                // Reboot after response is sent
+                delay(500);
+                ESP.restart();
+            } else {
+                doc["success"] = false;
+                doc["message"] = "Connection failed. Credentials saved.";
+                String output;
+                serializeJson(doc, output);
+                server->send(200, "application/json", output);
+            }
         } else {
             server->send(400, "text/plain", "Missing SSID or Password");
         }
@@ -120,24 +196,23 @@ void WebServerManager::setupRoutes() {
         }
     });
 
-    // If in AP Mode, redirect everything else to /wifi.html
-    if (isAPMode) {
-        server->onNotFound([this]() {
-            server->sendHeader("Location", "http://192.168.4.1/wifi.html", true);
-            server->send(302, "text/plain", "");
-        });
-        
-        server->on("/", HTTP_GET, [this]() {
-            server->sendHeader("Location", "http://192.168.4.1/wifi.html", true);
-            server->send(302, "text/plain", "");
-        });
-        return; // Stop registering other routes in AP mode
-    }
-
     // --- STA MODE ROUTES ---
 
-    // Serve Static Files
-    server->serveStatic("/", LittleFS, "/www/");
+    // G-Code Upload
+    server->on("/api/upload", HTTP_POST, 
+        [this]() { server->send(200, "text/plain", "Upload successful"); },
+        [this]() { this->handleUpload(); }
+    );
+
+    // API: Status
+    server->on("/api/status", HTTP_GET, [this]() {
+        JsonDocument doc;
+        doc["connected"] = true;
+        doc["hostname"] = deviceHostname;
+        String output;
+        serializeJson(doc, output);
+        server->send(200, "application/json", output);
+    });
     
     // Default to index.html
     server->on("/", HTTP_GET, [this]() {
@@ -150,23 +225,17 @@ void WebServerManager::setupRoutes() {
         }
     });
 
-    // G-Code Upload
-    server->on("/api/upload", HTTP_POST, 
-        [this]() { server->send(200, "text/plain", "Upload successful"); },
-        [this]() { this->handleUpload(); }
-    );
+    // Serve Static Files (Last to avoid intercepting API calls)
+    server->serveStatic("/", LittleFS, "/www/");
 
-    // API: Status
-    server->on("/api/status", HTTP_GET, [this]() {
-        JsonDocument doc;
-        doc["connected"] = true;
-        String output;
-        serializeJson(doc, output);
-        server->send(200, "application/json", output);
-    });
-    
     server->onNotFound([this]() {
-        server->send(404, "text/plain", "Not found");
+        if (isAPMode) {
+            // Redirect captive portal checks to index
+            server->sendHeader("Location", "http://" + WiFi.softAPIP().toString() + "/", true);
+            server->send(302, "text/plain", "");
+        } else {
+            server->send(404, "text/plain", "Not found");
+        }
     });
 }
 
@@ -209,5 +278,22 @@ void WebServerManager::broadcastStatus(float x, float y, float z, float e) {
     String output;
     serializeJson(doc, output);
     ws->broadcastTXT(output);
+    
+    // Optional: Send status to Telnet? 
+    // Usually Telnet expects "ok" or "X:10.00 Y:..." format, not JSON.
+    // For now, let's keep Telnet quiet unless requested (M114)
+}
+
+void WebServerManager::broadcastError(String message) {
+    JsonDocument doc;
+    doc["error"] = message;
+    String output;
+    serializeJson(doc, output);
+    ws->broadcastTXT(output);
+    
+    if (telnetClient && telnetClient.connected()) {
+        telnetClient.print("Error: ");
+        telnetClient.println(message);
+    }
 }
 

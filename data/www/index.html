@@ -6,14 +6,18 @@
     <title>Encoder3D Controller</title>
     <link rel="stylesheet" href="css/style.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
 </head>
 <body>
     <div id="app">
         <div id="sidebar">
-            <h1>Encoder3D</h1>
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <h1>Encoder3D</h1>
+                <a href="/wifi.html" style="color: #007acc; text-decoration: none; font-size: 0.9em;">⚙️ Setup</a>
+            </div>
             <div class="panel">
-                <h2>Status</h2>
+                <h2>Status <span id="ws-status" style="font-size: 0.6em; color: #f48771;">(Disconnected)</span></h2>
                 <div id="status-display">
                     <p>X: <span id="pos-x">0.00</span></p>
                     <p>Y: <span id="pos-y">0.00</span></p>
