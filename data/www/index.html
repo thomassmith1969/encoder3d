@@ -1,342 +1,54 @@
 <!DOCTYPE html>
-<!--
-  Encoder3D CNC Controller - Web Interface
-  
-  Copyright (c) 2025 Encoder3D Project Contributors
-  Licensed under the MIT License. See LICENSE file for details.
--->
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Encoder3D Controller</title>
-    <link rel="stylesheet" href="style.css">
-    <script src="https://cdn.jsdelivr.net/npm/three@0.159.0/build/three.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.159.0/examples/js/controls/OrbitControls.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.159.0/examples/js/loaders/STLLoader.js"></script>
+    <link rel="stylesheet" href="css/style.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
 </head>
 <body>
-    <div class="container">
-        <header>
-            <h1>🔧 Encoder3D CNC Controller</h1>
-            <div class="status-bar">
-                <span id="connection-status" class="status-badge disconnected">Disconnected</span>
-                <span id="mode-status" class="status-badge">3D Printer</span>
-            </div>
-            <nav class="main-nav">
-                <button class="nav-btn active" onclick="showTab('control')">Control</button>
-                <button class="nav-btn" onclick="showTab('model')">Model Viewer</button>
-                <button class="nav-btn" onclick="showTab('files')">File Manager</button>
-            </nav>
-        </header>
-
-        <!-- Tab: Control Panel -->
-        <div id="tab-control" class="tab-content active">
-        <div class="main-grid">
-            <!-- Left Panel: Position & Control -->
+    <div id="app">
+        <div id="sidebar">
+            <h1>Encoder3D</h1>
             <div class="panel">
-                <h2>Position Control</h2>
-                <div class="position-display">
-                    <div class="axis-display">
-                        <label>X:</label>
-                        <span id="pos-x">0.00</span> mm
-                    </div>
-                    <div class="axis-display">
-                        <label>Y:</label>
-                        <span id="pos-y">0.00</span> mm
-                    </div>
-                    <div class="axis-display">
-                        <label>Z:</label>
-                        <span id="pos-z">0.00</span> mm
-                    </div>
-                    <div class="axis-display">
-                        <label>E:</label>
-                        <span id="pos-e">0.00</span> mm
-                    </div>
-                </div>
-
-                <div class="jog-control">
-                    <h3>Jog Controls</h3>
-                    <div class="jog-distance">
-                        <label>Step Size:</label>
-                        <select id="jog-distance">
-                            <option value="0.1">0.1mm</option>
-                            <option value="1" selected>1mm</option>
-                            <option value="10">10mm</option>
-                            <option value="100">100mm</option>
-                        </select>
-                    </div>
-                    
-                    <div class="jog-xy">
-                        <button class="jog-btn" onclick="jog('Y', 1)">Y+</button>
-                        <div class="jog-xy-row">
-                            <button class="jog-btn" onclick="jog('X', -1)">X-</button>
-                            <button class="jog-btn home-btn" onclick="homeAll()">🏠</button>
-                            <button class="jog-btn" onclick="jog('X', 1)">X+</button>
-                        </div>
-                        <button class="jog-btn" onclick="jog('Y', -1)">Y-</button>
-                    </div>
-                    
-                    <div class="jog-z">
-                        <button class="jog-btn" onclick="jog('Z', 1)">Z+</button>
-                        <button class="jog-btn" onclick="jog('Z', -1)">Z-</button>
-                    </div>
-                </div>
-
-                <div class="home-controls">
-                    <button class="btn" onclick="homeAxis('X')">Home X</button>
-                    <button class="btn" onclick="homeAxis('Y')">Home Y</button>
-                    <button class="btn" onclick="homeAxis('Z')">Home Z</button>
+                <h2>Status</h2>
+                <div id="status-display">
+                    <p>X: <span id="pos-x">0.00</span></p>
+                    <p>Y: <span id="pos-y">0.00</span></p>
+                    <p>Z: <span id="pos-z">0.00</span></p>
+                    <p>E: <span id="pos-e">0.00</span></p>
                 </div>
             </div>
-
-            <!-- Middle Panel: Temperature & Mode -->
             <div class="panel">
-                <h2>Temperature Control</h2>
-                <div class="temp-control">
-                    <div class="temp-item">
-                        <h3>Hotend</h3>
-                        <div class="temp-display">
-                            <span id="temp-hotend-current" class="temp-current">0</span>°C /
-                            <span id="temp-hotend-target" class="temp-target">0</span>°C
-                        </div>
-                        <div class="temp-input">
-                            <input type="number" id="hotend-target" min="0" max="280" value="0">
-                            <button class="btn" onclick="setTemperature('hotend')">Set</button>
-                        </div>
-                        <div class="temp-presets">
-                            <button class="btn-small" onclick="setTemp('hotend', 0)">Off</button>
-                            <button class="btn-small" onclick="setTemp('hotend', 200)">PLA</button>
-                            <button class="btn-small" onclick="setTemp('hotend', 240)">ABS</button>
-                        </div>
-                    </div>
-
-                    <div class="temp-item">
-                        <h3>Bed</h3>
-                        <div class="temp-display">
-                            <span id="temp-bed-current" class="temp-current">0</span>°C /
-                            <span id="temp-bed-target" class="temp-target">0</span>°C
-                        </div>
-                        <div class="temp-input">
-                            <input type="number" id="bed-target" min="0" max="120" value="0">
-                            <button class="btn" onclick="setTemperature('bed')">Set</button>
-                        </div>
-                        <div class="temp-presets">
-                            <button class="btn-small" onclick="setTemp('bed', 0)">Off</button>
-                            <button class="btn-small" onclick="setTemp('bed', 60)">PLA</button>
-                            <button class="btn-small" onclick="setTemp('bed', 100)">ABS</button>
-                        </div>
-                    </div>
-                </div>
-
-                <h2>Operation Mode</h2>
-                <div class="mode-selector">
-                    <button class="mode-btn active" onclick="setMode('printer')">3D Printer</button>
-                    <button class="mode-btn" onclick="setMode('cnc')">CNC Spindle</button>
-                    <button class="mode-btn" onclick="setMode('laser')">Laser Cutter</button>
-                </div>
-
-                <div class="emergency-section">
-                    <button class="emergency-btn" onclick="emergencyStop()">🛑 EMERGENCY STOP</button>
-                </div>
+                <h2>Thermal</h2>
+                <p>Extruder: <span id="temp-ext">0</span>°C / <input type="number" id="target-ext" value="0" style="width: 50px"></p>
+                <p>Bed: <span id="temp-bed">0</span>°C / <input type="number" id="target-bed" value="0" style="width: 50px"></p>
+                <button onclick="setTemps()">Set Temps</button>
             </div>
-
-            <!-- Right Panel: Console & File Upload -->
             <div class="panel">
-                <h2>G-Code Console</h2>
-                <div class="console-container">
-                <h2>File Upload</h2>
-                <div class="file-upload">
-                    <input type="file" id="gcode-file" accept=".gcode,.nc,.txt">
-                    <button class="btn" onclick="uploadGCodeFile()">Upload to LittleFS</button>
-                    <button class="btn" onclick="uploadToSD()">Upload to SD Card</button>
-                    <p class="help-text">LittleFS: Max 100KB | SD Card: Unlimited</p>
-                </div>div>
-                </div>
-
-                <h2>File Upload</h2>
-                <div class="file-upload">
-                    <input type="file" id="gcode-file" accept=".gcode,.nc,.txt">
-                    <button class="btn" onclick="uploadFile()">Upload G-Code</button>
-                </div>
-
-                <h2>Quick Commands</h2>
-                <div class="quick-commands">
-                    <button class="btn-small" onclick="sendGCode('M105')">Report Temps</button>
-                    <button class="btn-small" onclick="sendGCode('M114')">Report Position</button>
+                <h2>Manual Control</h2>
+                <button onclick="sendGCode('G28')">Home All</button>
+                <div class="jog-controls">
+                    <button onclick="sendGCode('G1 X-10')">X-</button>
+                    <button onclick="sendGCode('G1 X10')">X+</button>
+                    <button onclick="sendGCode('G1 Y-10')">Y-</button>
+                    <button onclick="sendGCode('G1 Y10')">Y+</button>
+                    <button onclick="sendGCode('G1 Z-10')">Z-</button>
+                    <button onclick="sendGCode('G1 Z10')">Z+</button>
                 </div>
             </div>
-        </div>
-        </div>
-        <!-- End Tab: Control -->
-
-        <!-- Tab: Model Viewer & Slicer -->
-        <div id="tab-model" class="tab-content">
-            <div class="model-grid">
-                <!-- 3D Viewer Panel -->
-                <div class="panel viewer-panel">
-                    <h2>STL Viewer</h2>
-                    <div id="viewer-container" class="viewer-3d"></div>
-                    <div class="viewer-controls">
-    </div>
-
-    <script src="app.js"></script>
-    <script src="viewer.js"></script>
-    <script src="slicer.js"></script>
-    <script src="filemanager.js"></script>
-</body>
-</html>                     <input type="checkbox" id="show-grid" checked onchange="toggleGrid()"> Grid
-                        </label>
-                        <label>
-                            <input type="checkbox" id="show-axes" checked onchange="toggleAxes()"> Axes
-                        </label>
-                    </div>
-                    <div class="model-info">
-                        <div><strong>Model:</strong> <span id="model-name">None loaded</span></div>
-                        <div><strong>Size:</strong> <span id="model-size">-</span></div>
-                        <div><strong>Vertices:</strong> <span id="model-vertices">-</span></div>
-                    </div>
-                </div>
-
-                <!-- Slicer Panel -->
-                <div class="panel slicer-panel">
-                    <h2>Slicer Settings</h2>
-                    <div class="slicer-settings">
-                        <div class="setting-group">
-                            <h3>Print Settings</h3>
-                            <label>Layer Height (mm):
-                                <input type="number" id="layer-height" value="0.2" step="0.05" min="0.05" max="0.5">
-                            </label>
-                            <label>First Layer Height (mm):
-                                <input type="number" id="first-layer-height" value="0.3" step="0.05" min="0.1" max="1.0">
-                            </label>
-                            <label>Infill %:
-                                <input type="number" id="infill" value="20" min="0" max="100">
-                            </label>
-                            <label>Print Speed (mm/s):
-                                <input type="number" id="print-speed" value="60" min="10" max="200">
-                            </label>
-                        </div>
-
-                        <div class="setting-group">
-                            <h3>Temperature</h3>
-                            <label>Nozzle (°C):
-                                <input type="number" id="slice-nozzle-temp" value="200" min="0" max="280">
-                            </label>
-                            <label>Bed (°C):
-                                <input type="number" id="slice-bed-temp" value="60" min="0" max="120">
-                            </label>
-                        </div>
-
-                        <div class="setting-group">
-                            <h3>Perimeters & Support</h3>
-                            <label>Wall Lines:
-                                <input type="number" id="wall-lines" value="3" min="1" max="10">
-                            </label>
-                            <label>Top Layers:
-                                <input type="number" id="top-layers" value="4" min="0" max="20">
-                            </label>
-                            <label>Bottom Layers:
-                                <input type="number" id="bottom-layers" value="4" min="0" max="20">
-                            </label>
-                            <label>
-                                <input type="checkbox" id="enable-support"> Generate Support
-                            </label>
-                        </div>
-
-                        <div class="setting-group">
-                            <h3>Actions</h3>
-                            <div class="file-upload">
-                                <input type="file" id="stl-file" accept=".stl">
-                                <button class="btn" onclick="loadSTL()">Load STL</button>
-                            </div>
-                            <button class="btn btn-primary" onclick="sliceModel()">Slice to G-Code</button>
-                            <div id="slice-progress" class="progress-bar" style="display:none;">
-                                <div id="slice-progress-fill" class="progress-fill"></div>
-                                <span id="slice-progress-text">Slicing...</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- G-Code Preview Panel -->
-                <div class="panel gcode-panel">
-                    <h2>G-Code Preview</h2>
-                    <div id="gcode-stats" class="gcode-stats">
-                        <div><strong>Lines:</strong> <span id="gcode-lines">0</span></div>
-                        <div><strong>Est. Time:</strong> <span id="gcode-time">-</span></div>
-                        <div><strong>Filament:</strong> <span id="gcode-filament">-</span></div>
-                        <div><strong>Size:</strong> <span id="gcode-size">0 KB</span></div>
-                    </div>
-                    <textarea id="gcode-preview" class="gcode-textarea" readonly placeholder="G-code will appear here after slicing..."></textarea>
-                    <div class="gcode-actions">
-                        <button class="btn" onclick="downloadGCode()">Download G-Code</button>
-                        <button class="btn btn-primary" onclick="uploadSlicedGCode()">Upload to LittleFS</button>
-                        <button class="btn" onclick="uploadSlicedToSD()">Upload to SD Card</button>
-                    </div>
-                </div>
+            <div class="panel">
+                <h2>Job</h2>
+                <input type="file" id="gcode-upload">
+                <button onclick="uploadGCode()">Upload & Print</button>
             </div>
         </div>
-        <!-- End Tab: Model Viewer -->
-
-        <!-- Tab: File Manager -->
-        <div id="tab-files" class="tab-content">
-            <div class="file-manager-grid">
-                <!-- LittleFS Files -->
-                <div class="panel">
-                    <h2>LittleFS Files (≤100KB)</h2>
-                    <div class="file-actions">
-                        <button class="btn" onclick="refreshLittleFSFiles()">🔄 Refresh</button>
-                        <span class="help-text">System storage for small files</span>
-                    </div>
-                    <div id="littlefs-files" class="file-list">
-                        <p class="loading">Loading files...</p>
-                    </div>
-                </div>
-
-                <!-- SD Card Files -->
-                <div class="panel">
-                    <h2>SD Card Files</h2>
-                    <div class="file-actions">
-                        <button class="btn" onclick="refreshSDFiles()">🔄 Refresh</button>
-                        <button class="btn" onclick="initSD()">Initialize SD</button>
-                    </div>
-                    <div id="sd-status" class="sd-status">
-                        <strong>Status:</strong> <span id="sd-status-text">Unknown</span>
-                    </div>
-                    <div id="sd-print-status" class="print-status" style="display:none;">
-                        <div><strong>File:</strong> <span id="current-file">-</span></div>
-                        <div><strong>Progress:</strong> <span id="print-progress">0</span>%</div>
-                        <div><strong>Lines:</strong> <span id="lines-executed">0</span></div>
-                        <div class="progress-bar">
-                            <div id="print-progress-fill" class="progress-fill"></div>
-                        </div>
-                        <div class="print-controls">
-                            <button class="btn" onclick="pausePrint()">⏸ Pause</button>
-                            <button class="btn" onclick="resumePrint()">▶ Resume</button>
-                            <button class="btn btn-danger" onclick="stopPrint()">⏹ Stop</button>
-                        </div>
-                    </div>
-                    <div id="sd-files" class="file-list">
-                        <p class="loading">Click refresh to load files...</p>
-                    </div>
-                </div>
-            </div>
-        </div>
-        <!-- End Tab: Files -->
-
-        <!-- Visualization Area (moved from bottom) -->
-        <div class="panel visualization-panel" style="display:none;">
-            <h2>Visualization</h2>
-            <div id="visualization" class="visualization-area">
-                <p>3D visualization coming soon...</p>
-                <p>This area will display the loaded model and current toolpath.</p>
-                <p>3D visualization coming soon...</p>
-                <p>This area will display the loaded model and current toolpath.</p>
-            </div>
+        <div id="viewer-container">
+            <!-- Three.js Canvas will be injected here -->
         </div>
     </div>
-
-    <script src="app.js"></script>
+    <script src="js/app.js"></script>
 </body>
 </html>

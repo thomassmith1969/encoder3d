@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Encoder3D WiFi Setup</title>
+    <style>
+        body { font-family: sans-serif; background: #1e1e1e; color: #e0e0e0; padding: 20px; }
+        .container { max-width: 400px; margin: 0 auto; background: #2d2d30; padding: 20px; border-radius: 8px; }
+        input { width: 100%; padding: 8px; margin: 5px 0; background: #3c3c3c; border: 1px solid #555; color: white; }
+        button { width: 100%; padding: 10px; background: #0e639c; color: white; border: none; cursor: pointer; margin-top: 10px; }
+        button:hover { background: #1177bb; }
+        #networks { margin-top: 20px; }
+        .network { padding: 10px; border-bottom: 1px solid #444; cursor: pointer; }
+        .network:hover { background: #3c3c3c; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>WiFi Setup</h1>
+        <form action="/api/wifi/save" method="POST">
+            <label>SSID</label>
+            <input type="text" name="ssid" id="ssid" required>
+            <label>Password</label>
+            <input type="password" name="pass" id="pass">
+            <button type="submit">Connect</button>
+        </form>
+        <button onclick="scanNetworks()">Scan Networks</button>
+        <div id="networks"></div>
+    </div>
+
+    <script>
+        function scanNetworks() {
+            document.getElementById('networks').innerHTML = 'Scanning...';
+            fetch('/api/wifi/scan')
+                .then(response => response.json())
+                .then(data => {
+                    const div = document.getElementById('networks');
+                    div.innerHTML = '';
+                    data.forEach(net => {
+                        const el = document.createElement('div');
+                        el.className = 'network';
+                        el.innerText = `${net.ssid} (${net.rssi} dBm) ${net.secure ? '🔒' : ''}`;
+                        el.onclick = () => document.getElementById('ssid').value = net.ssid;
+                        div.appendChild(el);
+                    });
+                });
+        }
+    </script>
+</body>
+</html>
