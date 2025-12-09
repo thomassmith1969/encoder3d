@@ -19,10 +19,18 @@
             <div class="panel">
                 <h2>Status <span id="ws-status" style="font-size: 0.6em; color: #f48771;">(Disconnected)</span></h2>
                 <div id="status-display">
-                    <p>X: <span id="pos-x">0.00</span></p>
-                    <p>Y: <span id="pos-y">0.00</span></p>
-                    <p>Z: <span id="pos-z">0.00</span></p>
-                    <p>E: <span id="pos-e">0.00</span></p>
+                    <p>X: <span id="pos-x">0.00</span> mm <small style="color:#999">(set: <span id="set-x">0.00</span> mm, last move: <span id="lastmove-x">0ms</span>)</small></p>
+                    <p>Y: <span id="pos-y">0.00</span> mm <small style="color:#999">(set: <span id="set-y">0.00</span> mm, last move: <span id="lastmove-y">0ms</span>)</small></p>
+                    <p>Z: <span id="pos-z">0.00</span> mm <small style="color:#999">(set: <span id="set-z">0.00</span> mm, last move: <span id="lastmove-z">0ms</span>)</small></p>
+                    <p>E: <span id="pos-e">0.00</span> mm <small style="color:#999">(set: <span id="set-e">0.00</span> mm, last move: <span id="lastmove-e">0ms</span>)</small></p>
+                </div>
+                <div id="diagnostics" style="margin-top:8px; border-top:1px solid #333; padding-top:8px;">
+                    <p>Executor: <strong id="exec-busy">idle</strong> <small id="exec-owner" style="color:#999">(owner: -)</small></p>
+                    <p>Halt: <span id="halt-reason" style="color:#f48771">none</span></p>
+                    <div style="margin-top:6px;">
+                        <div style="font-size:0.9em; color:#aaa; margin-bottom:4px">Messages</div>
+                        <div id="msg-log" style="background:#111; border:1px solid #222; padding:8px; height:90px; overflow:auto; font-size:0.9em; color:#ddd; white-space:pre-wrap;"></div>
+                    </div>
                 </div>
             </div>
             <div class="panel">

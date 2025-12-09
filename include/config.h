@@ -50,6 +50,41 @@
 #define CONTROL_FREQ    1000  // 1kHz Control Loop
 #define MAX_FOLLOWING_ERROR 400 // Max encoder counts error before stall (Lowered for sensitivity)
 #define THERMAL_FREQ    10    // 10Hz Thermal Loop
+// Stall detection config
+#define STALL_TIMEOUT_MS 300 // ms without encoder movement while motor commanded -> stall
+#define MIN_MOTOR_COMMAND 20 // PWM threshold to consider motor actively driving
+// Stall/warning tiers
+#define STALL_WARNING_MS 150 // ms without encoder movement -> warning
+#define FOLLOWING_ERROR_WARN 200 // encoder counts deviation to trigger a warning
+#define FOLLOWING_ERROR_HALT 400 // encoder counts deviation to force a halt
+
+// Position tolerance (counts) for considering a move finished
+#define POSITION_TOLERANCE 5
+
+// Command execution behavior
+#define COMMAND_EXECUTE_TIMEOUT_MS 5000 // maximum time allowed per command (ms)
+
+// --- Optional I/O (set to -1 if not present on your board) ---
+// Fan, spindle and laser pins are optional. Configure to match hardware.
+#define PIN_FAN         -1
+#define PIN_SPINDLE     -1
+#define PIN_LASER       -1
+
+// PWM channels for optional outputs (change if overlapping other channels)
+#define PWM_CHAN_FAN    6
+#define PWM_CHAN_SPINDLE 7
+#define PWM_CHAN_LASER  8
+
+// Feedrate limits (mm/min). If feedrate is 0 in G-code, controller will use full power.
+#define DEFAULT_FEEDRATE 1500
+#define MAX_FEEDRATE     12000
+
+// Position deviation thresholds (counts)
+// - POSITION_WARN_TOLERANCE_COUNTS: deviation above this sends warnings (broadcast)
+// - POSITION_HALT_TOLERANCE_COUNTS: deviation above this triggers a halt (broadcast error)
+// Tune these to avoid false positives; encoders are high-resolution (counts).
+#define POSITION_WARN_TOLERANCE_COUNTS 20
+#define POSITION_HALT_TOLERANCE_COUNTS 200
 
 // --- PID CONSTANTS (Placeholder - Needs Tuning) ---
 #define KP_DEFAULT      1.0

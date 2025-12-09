@@ -8,12 +8,14 @@ class MotorDriver {
 private:
     uint8_t pinA;
     uint8_t pinB;
+    uint8_t pwmChannel;
     int8_t attachedPin; // -1: None, 0: PinA, 1: PinB
 
 public:
     MotorDriver(uint8_t pA, uint8_t pB, uint8_t channel) {
         pinA = pA;
         pinB = pB;
+        pwmChannel = channel;
         attachedPin = -1;
     }
 
@@ -22,6 +24,7 @@ public:
         pinMode(pinB, OUTPUT);
         digitalWrite(pinA, LOW);
         digitalWrite(pinB, LOW);
+        ledcSetup(pwmChannel, PWM_FREQ, PWM_RES);
     }
 
     // The "One Channel Switched" Logic
@@ -33,45 +36,43 @@ public:
         if (speed > 0) {
             // FORWARD: PWM on Pin A, Ground Pin B
             if (attachedPin == 1) {
-                ledcDetach(pinB);
-                pinMode(pinB, OUTPUT); // Ensure it's back to GPIO
+                ledcDetachPin(pinB);
+                pinMode(pinB, OUTPUT);
                 attachedPin = -1;
             }
             digitalWrite(pinB, LOW);
             
             if (attachedPin != 0) {
-                if (ledcAttach(pinA, PWM_FREQ, PWM_RES)) {
-                    attachedPin = 0;
-                }
+                ledcAttachPin(pinA, pwmChannel);
+                attachedPin = 0;
             }
-            ledcWrite(pinA, abs(speed));
+            ledcWrite(pwmChannel, abs(speed));
         } 
         else if (speed < 0) {
             // REVERSE: PWM on Pin B, Ground Pin A
             if (attachedPin == 0) {
-                ledcDetach(pinA);
-                pinMode(pinA, OUTPUT); // Ensure it's back to GPIO
+                ledcDetachPin(pinA);
+                pinMode(pinA, OUTPUT);
                 attachedPin = -1;
             }
             digitalWrite(pinA, LOW);
             
             if (attachedPin != 1) {
-                if (ledcAttach(pinB, PWM_FREQ, PWM_RES)) {
-                    attachedPin = 1;
-                }
+                ledcAttachPin(pinB, pwmChannel);
+                attachedPin = 1;
             }
-            ledcWrite(pinB, abs(speed));
+            ledcWrite(pwmChannel, abs(speed));
         } 
         else {
             // STOP: Ground both
             if (attachedPin == 0) {
-                ledcDetach(pinA);
-                pinMode(pinA, OUTPUT); // Ensure it's back to GPIO
+                ledcDetachPin(pinA);
+                pinMode(pinA, OUTPUT);
                 attachedPin = -1;
             }
             if (attachedPin == 1) {
-                ledcDetach(pinB);
-                pinMode(pinB, OUTPUT); // Ensure it's back to GPIO
+                ledcDetachPin(pinB);
+                pinMode(pinB, OUTPUT);
                 attachedPin = -1;
             }
             digitalWrite(pinA, LOW);

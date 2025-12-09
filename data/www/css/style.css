@@ -66,6 +66,12 @@ body {
     border-radius: 5px;
 }
 
+#msg-log {
+    font-family: monospace;
+    font-size: 0.85em;
+    line-height: 1.2em;
+}
+
 h1 { margin-top: 0; color: #007acc; }
 h2 { margin-top: 0; font-size: 1.2em; border-bottom: 1px solid #444; padding-bottom: 5px; }
 
