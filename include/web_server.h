@@ -14,6 +14,7 @@
 #include <ESPmDNS.h>
 #include "config.h"
 #include "thermal.h"
+#include "pid_controller.h"
 
 // Forward declarations
 class ThermalManager;
@@ -41,6 +42,25 @@ extern volatile bool encSeenX;
 extern volatile bool encSeenY;
 extern volatile bool encSeenZ;
 extern volatile bool encSeenE;
+
+// Runtime-configurable globals (defined in main.cpp)
+extern float countsPerMM_X;
+extern float countsPerMM_Y;
+extern float countsPerMM_Z;
+extern float countsPerMM_E;
+
+extern float pid_kp_x; extern float pid_ki_x; extern float pid_kd_x;
+extern float pid_kp_y; extern float pid_ki_y; extern float pid_kd_y;
+extern float pid_kp_z; extern float pid_ki_z; extern float pid_kd_z;
+extern float pid_kp_e; extern float pid_ki_e; extern float pid_kd_e;
+
+extern int maxFeedrateX; extern int maxFeedrateY; extern int maxFeedrateZ; extern int maxFeedrateE;
+
+// Expose PID controllers declared in main
+extern PIDController pidX;
+extern PIDController pidY;
+extern PIDController pidZ;
+extern PIDController pidE;
 
 class WebServerManager {
 private:

@@ -45,6 +45,9 @@ public:
         prevError = 0;
         lastTime = micros();
     }
+    void setTunings(float p, float i, float d) {
+        kp = p; ki = i; kd = d;
+    }
 };
 
 #endif

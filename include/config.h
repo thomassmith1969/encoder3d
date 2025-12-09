@@ -86,6 +86,12 @@
 #define POSITION_WARN_TOLERANCE_COUNTS 20
 #define POSITION_HALT_TOLERANCE_COUNTS 200
 
+// Default encoder counts per mm (floating, 4 decimal precision recommended)
+#define DEFAULT_COUNTS_PER_MM_X 100.0f
+#define DEFAULT_COUNTS_PER_MM_Y 100.0f
+#define DEFAULT_COUNTS_PER_MM_Z 100.0f
+#define DEFAULT_COUNTS_PER_MM_E 100.0f
+
 // --- PID CONSTANTS (Placeholder - Needs Tuning) ---
 #define KP_DEFAULT      1.0
 #define KI_DEFAULT      0.0

@@ -283,6 +283,92 @@ void WebServerManager::setupRoutes() {
         server->send(200, "application/json", output);
     });
 
+    // API: Config (get)
+    server->on("/api/config", HTTP_GET, [this]() {
+        DynamicJsonDocument doc(1024);
+        JsonObject c = doc.createNestedObject("countsPerMM");
+        c["x"] = countsPerMM_X; c["y"] = countsPerMM_Y; c["z"] = countsPerMM_Z; c["e"] = countsPerMM_E;
+        JsonObject pid = doc.createNestedObject("pid");
+        JsonObject px = pid.createNestedObject("x"); px["p"] = pid_kp_x; px["i"] = pid_ki_x; px["d"] = pid_kd_x;
+        JsonObject py = pid.createNestedObject("y"); py["p"] = pid_kp_y; py["i"] = pid_ki_y; py["d"] = pid_kd_y;
+        JsonObject pz = pid.createNestedObject("z"); pz["p"] = pid_kp_z; pz["i"] = pid_ki_z; pz["d"] = pid_kd_z;
+        JsonObject pe = pid.createNestedObject("e"); pe["p"] = pid_kp_e; pe["i"] = pid_ki_e; pe["d"] = pid_kd_e;
+        JsonObject mf = doc.createNestedObject("maxFeedrate");
+        mf["x"] = maxFeedrateX; mf["y"] = maxFeedrateY; mf["z"] = maxFeedrateZ; mf["e"] = maxFeedrateE;
+        String output;
+        serializeJson(doc, output);
+        server->send(200, "application/json", output);
+    });
+
+    // API: Config (set)
+    server->on("/api/config", HTTP_POST, [this]() {
+        if (!server->hasArg("plain")) { server->send(400, "text/plain", "Missing body"); return; }
+        String body = server->arg("plain");
+        DynamicJsonDocument doc(1024);
+        DeserializationError err = deserializeJson(doc, body);
+        if (err) { server->send(400, "text/plain", "Invalid JSON"); return; }
+        Preferences prefs; prefs.begin("cnc", false);
+        if (doc.containsKey("countsPerMM") && doc["countsPerMM"].is<JsonObject>()) {
+            JsonObject c = doc["countsPerMM"].as<JsonObject>();
+            if (c.containsKey("x")) { countsPerMM_X = c["x"].as<float>(); prefs.putFloat("cpm_x", countsPerMM_X); }
+            if (c.containsKey("y")) { countsPerMM_Y = c["y"].as<float>(); prefs.putFloat("cpm_y", countsPerMM_Y); }
+            if (c.containsKey("z")) { countsPerMM_Z = c["z"].as<float>(); prefs.putFloat("cpm_z", countsPerMM_Z); }
+            if (c.containsKey("e")) { countsPerMM_E = c["e"].as<float>(); prefs.putFloat("cpm_e", countsPerMM_E); }
+        }
+        if (doc.containsKey("pid") && doc["pid"].is<JsonObject>()) {
+            JsonObject p = doc["pid"].as<JsonObject>();
+            if (p.containsKey("x") && p["x"].is<JsonObject>()) {
+                JsonObject px = p["x"].as<JsonObject>();
+                pid_kp_x = px["p"].as<float>();
+                pid_ki_x = px["i"].as<float>();
+                pid_kd_x = px["d"].as<float>();
+                prefs.putFloat("pid_kp_x", pid_kp_x);
+                prefs.putFloat("pid_ki_x", pid_ki_x);
+                prefs.putFloat("pid_kd_x", pid_kd_x);
+                pidX.setTunings(pid_kp_x, pid_ki_x, pid_kd_x);
+            }
+            if (p.containsKey("y") && p["y"].is<JsonObject>()) {
+                JsonObject py = p["y"].as<JsonObject>();
+                pid_kp_y = py["p"].as<float>();
+                pid_ki_y = py["i"].as<float>();
+                pid_kd_y = py["d"].as<float>();
+                prefs.putFloat("pid_kp_y", pid_kp_y);
+                prefs.putFloat("pid_ki_y", pid_ki_y);
+                prefs.putFloat("pid_kd_y", pid_kd_y);
+                pidY.setTunings(pid_kp_y, pid_ki_y, pid_kd_y);
+            }
+            if (p.containsKey("z") && p["z"].is<JsonObject>()) {
+                JsonObject pz = p["z"].as<JsonObject>();
+                pid_kp_z = pz["p"].as<float>();
+                pid_ki_z = pz["i"].as<float>();
+                pid_kd_z = pz["d"].as<float>();
+                prefs.putFloat("pid_kp_z", pid_kp_z);
+                prefs.putFloat("pid_ki_z", pid_ki_z);
+                prefs.putFloat("pid_kd_z", pid_kd_z);
+                pidZ.setTunings(pid_kp_z, pid_ki_z, pid_kd_z);
+            }
+            if (p.containsKey("e") && p["e"].is<JsonObject>()) {
+                JsonObject pe = p["e"].as<JsonObject>();
+                pid_kp_e = pe["p"].as<float>();
+                pid_ki_e = pe["i"].as<float>();
+                pid_kd_e = pe["d"].as<float>();
+                prefs.putFloat("pid_kp_e", pid_kp_e);
+                prefs.putFloat("pid_ki_e", pid_ki_e);
+                prefs.putFloat("pid_kd_e", pid_kd_e);
+                pidE.setTunings(pid_kp_e, pid_ki_e, pid_kd_e);
+            }
+        }
+        if (doc.containsKey("maxFeedrate") && doc["maxFeedrate"].is<JsonObject>()) {
+            JsonObject m = doc["maxFeedrate"].as<JsonObject>();
+            if (m.containsKey("x")) { maxFeedrateX = m["x"].as<int>(); prefs.putInt("maxF_x", maxFeedrateX); }
+            if (m.containsKey("y")) { maxFeedrateY = m["y"].as<int>(); prefs.putInt("maxF_y", maxFeedrateY); }
+            if (m.containsKey("z")) { maxFeedrateZ = m["z"].as<int>(); prefs.putInt("maxF_z", maxFeedrateZ); }
+            if (m.containsKey("e")) { maxFeedrateE = m["e"].as<int>(); prefs.putInt("maxF_e", maxFeedrateE); }
+        }
+        prefs.end();
+        server->send(200, "application/json", "{\"success\":true}");
+    });
+
     // (no test-only HTTP endpoints are installed in production firmware)
     
     // Default to index.html
