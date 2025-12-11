@@ -33,6 +33,12 @@ volatile uint8_t executorOwnerType = SRC_SERIAL;
 volatile int executorOwnerId = -1;
 volatile bool executorBusy = false;
 
+// Last motor outputs (signed -255..255) for diagnostics
+volatile int motorOutX = 0;
+volatile int motorOutY = 0;
+volatile int motorOutZ = 0;
+volatile int motorOutE = 0;
+
 // --- ENCODER ISRs & state ---
 volatile long encX = 0;
 volatile long encY = 0;
@@ -49,12 +55,60 @@ unsigned long lastPosWarnX = 0, lastPosWarnY = 0, lastPosWarnZ = 0, lastPosWarnE
 // Current desired positions (scaled counts)
 long currentPosX = 0, currentPosY = 0, currentPosZ = 0, currentPosE = 0;
 
+// Runtime-configurable parameters (stored in Preferences)
+float countsPerMM_X = DEFAULT_COUNTS_PER_MM_X;
+float countsPerMM_Y = DEFAULT_COUNTS_PER_MM_Y;
+float countsPerMM_Z = DEFAULT_COUNTS_PER_MM_Z;
+float countsPerMM_E = DEFAULT_COUNTS_PER_MM_E;
+
+// Per-axis PID tunings (defaults from config.h KP_DEFAULT...)
+float pid_kp_x = KP_DEFAULT, pid_ki_x = KI_DEFAULT, pid_kd_x = KD_DEFAULT;
+float pid_kp_y = KP_DEFAULT, pid_ki_y = KI_DEFAULT, pid_kd_y = KD_DEFAULT;
+float pid_kp_z = KP_DEFAULT, pid_ki_z = KI_DEFAULT, pid_kd_z = KD_DEFAULT;
+float pid_kp_e = KP_DEFAULT, pid_ki_e = KI_DEFAULT, pid_kd_e = KD_DEFAULT;
+
+// Max feedrates (mm/min)
+int maxFeedrateX = MAX_FEEDRATE;
+int maxFeedrateY = MAX_FEEDRATE;
+int maxFeedrateZ = MAX_FEEDRATE;
+int maxFeedrateE = MAX_FEEDRATE;
+
 // Positioning mode
 bool absolutePositioning = false; // Default to relative (G91) for simple jogs
 
 // System flags
 volatile bool isHalted = false;
 String haltReason = "";
+
+// Helper: disable spindle and laser immediately and persist state
+void disableSpindleAndLaser() {
+    // Turn off hardware outputs if present
+    if (PIN_SPINDLE >= 0) ledcWrite(PWM_CHAN_SPINDLE, 0);
+    if (PIN_LASER >= 0) ledcWrite(PWM_CHAN_LASER, 0);
+    // Update runtime globals
+    spindlePower = 0;
+    laserPower = 0;
+    // Persist to Preferences
+    Preferences prefs;
+    prefs.begin("cnc", false);
+    prefs.putInt("spindle_p", 0);
+    prefs.putInt("laser_p", 0);
+    prefs.end();
+    // Notify connected clients
+    if (webServer) {
+        webServer->broadcastWarning(String("Spindle and laser disabled: ") + haltReason);
+    }
+}
+
+// Run control globals
+volatile bool runPaused = false;
+volatile bool runStopped = false;
+volatile int runSpeedPercent = 100; // percent (5 - 500)
+volatile float runSpeedMultiplier = 1.0f; // = runSpeedPercent / 100.0
+
+// Spindle / Laser runtime globals (0..255)
+volatile int spindlePower = 0;
+volatile int laserPower = 0;
 
 // Encoder presence flags - set when we observe any encoder edges
 volatile bool encSeenX = false;
@@ -94,11 +148,13 @@ void networkTask(void *pvParameters) {
         static unsigned long lastStatus = 0;
         if (millis() - lastStatus > 100) {
             if (isHalted) {
+                // Ensure spindle/laser are disabled on halt
+                disableSpindleAndLaser();
                 webServer->broadcastError(haltReason);
             } else {
                 // Send encoder positions (converted to mm), setpoints (mm), and last movement ages
-                float encXm = encX / 100.0; float encYm = encY / 100.0; float encZm = encZ / 100.0; float encEm = encE / 100.0;
-                float setXm = currentPosX / 100.0; float setYm = currentPosY / 100.0; float setZm = currentPosZ / 100.0; float setEm = currentPosE / 100.0;
+                float encXm = encX / countsPerMM_X; float encYm = encY / countsPerMM_Y; float encZm = encZ / countsPerMM_Z; float encEm = encE / countsPerMM_E;
+                float setXm = currentPosX / countsPerMM_X; float setYm = currentPosY / countsPerMM_Y; float setZm = currentPosZ / countsPerMM_Z; float setEm = currentPosE / countsPerMM_E;
                 unsigned long now = millis();
                 unsigned long lmX = now - lastEncChangeX;
                 unsigned long lmY = now - lastEncChangeY;
@@ -110,7 +166,9 @@ void networkTask(void *pvParameters) {
                     (float)thermal.getExtruderTemp(), (float)thermal.getBedTemp(),
                     (float)thermal.getExtruderTarget(), (float)thermal.getBedTarget(),
                     setXm, setYm, setZm, setEm,
-                    lmX, lmY, lmZ, lmE);
+                    lmX, lmY, lmZ, lmE,
+                    motorOutX, motorOutY, motorOutZ, motorOutE,
+                    encX, encY, encZ, encE);
             }
 
             // (networkTask) -- no feedrate clamping here
@@ -138,21 +196,21 @@ void thermalTask(void *pvParameters) {
 
 // Core 1: Motion Control
 struct MotionCommand {
-    long targetX, targetY, targetZ, targetE;
+    float targetXmm, targetYmm, targetZmm, targetEmm;
     bool hasX, hasY, hasZ, hasE; // which axes were specified
     bool isRelative;
     bool isHoming;
     bool isEmergency; // M112
     uint8_t ownerType; // SRC_*
     int ownerId;
-    int feedrate; // mm/min (0 == unspecified / full)
+    float feedrate; // mm/min (0 == unspecified / full)
 };
 
 void parserTask(void *pvParameters) {
     char buffer[64];
     MotionCommand cmd;
     // Initialize targets to 0 and clear axis flags
-    cmd.targetX = 0; cmd.targetY = 0; cmd.targetZ = 0; cmd.targetE = 0;
+    cmd.targetXmm = 0.0f; cmd.targetYmm = 0.0f; cmd.targetZmm = 0.0f; cmd.targetEmm = 0.0f;
     cmd.hasX = cmd.hasY = cmd.hasZ = cmd.hasE = false;
     cmd.isRelative = true; // Default to relative for jog buttons
     cmd.isHoming = false;
@@ -175,7 +233,11 @@ void parserTask(void *pvParameters) {
             line.toUpperCase();
             if (line.length() == 0) continue;
         } else {
-            size_t bytes = xStreamBufferReceive(gcodeStream, buffer, 64, portMAX_DELAY);
+            // Avoid blocking forever on the serial stream so we can still
+            // service queued client commands that arrive while no serial
+            // input is present. Use a short timeout and loop back to check
+            // the `commandQueue` frequently.
+            size_t bytes = xStreamBufferReceive(gcodeStream, buffer, 64, (TickType_t)10);
             if (bytes <= 0) continue;
             buffer[bytes] = '\0'; // Ensure null termination
             line = String(buffer);
@@ -183,8 +245,10 @@ void parserTask(void *pvParameters) {
             // Normalize to uppercase so both 'X' and 'x' (and 'g','G') are parsed
             line.toUpperCase();
             if (line.length() == 0) continue;
-            // default owner: serial
-            raw.srcType = SRC_SERIAL;
+            // default owner: if a job streamer is active, mark as SRC_JOB so
+            // controlTask and executor semantics know these motions originate
+            // from a file job rather than an interactive client.
+            raw.srcType = jobActive ? SRC_JOB : SRC_SERIAL;
             raw.srcId = 0;
             raw.len = bytes;
             strncpy(raw.line, buffer, min((size_t)127, bytes));
@@ -197,40 +261,40 @@ void parserTask(void *pvParameters) {
                 cmd.isHoming = false;
                 cmd.hasX = cmd.hasY = cmd.hasZ = cmd.hasE = false;
 
-                // Parse X
+                // Parse X (float mm)
                 int xIdx = line.indexOf('X');
                 if (xIdx != -1) {
-                    cmd.targetX = line.substring(xIdx + 1).toInt();
+                    cmd.targetXmm = line.substring(xIdx + 1).toFloat();
                     cmd.hasX = true;
                 }
 
                 // Parse Y
                 int yIdx = line.indexOf('Y');
                 if (yIdx != -1) {
-                    cmd.targetY = line.substring(yIdx + 1).toInt();
+                    cmd.targetYmm = line.substring(yIdx + 1).toFloat();
                     cmd.hasY = true;
                 }
 
                 // Parse Z
                 int zIdx = line.indexOf('Z');
                 if (zIdx != -1) {
-                    cmd.targetZ = line.substring(zIdx + 1).toInt();
+                    cmd.targetZmm = line.substring(zIdx + 1).toFloat();
                     cmd.hasZ = true;
                 }
 
                 // Parse E
                 int eIdx = line.indexOf('E');
                 if (eIdx != -1) {
-                    cmd.targetE = line.substring(eIdx + 1).toInt();
+                    cmd.targetEmm = line.substring(eIdx + 1).toFloat();
                     cmd.hasE = true;
                 }
 
                 // Parse Feedrate F (optional)
                 int fIdx = line.indexOf('F');
                 if (fIdx != -1) {
-                    cmd.feedrate = line.substring(fIdx + 1).toInt();
+                    cmd.feedrate = line.substring(fIdx + 1).toFloat();
                 } else {
-                    cmd.feedrate = 0;
+                    cmd.feedrate = 0.0f;
                 }
 
                 // set owner fields
@@ -282,15 +346,15 @@ void parserTask(void *pvParameters) {
                         float ang = startAng + delta * t;
                         float px = cx + r * cos(ang);
                         float py = cy + r * sin(ang);
-                        MotionCommand arcCmd;
-                        arcCmd.isHoming = false; arcCmd.isEmergency = false;
-                        arcCmd.ownerType = raw.srcType; arcCmd.ownerId = raw.srcId;
-                        arcCmd.hasX = true; arcCmd.hasY = true; arcCmd.hasZ = false; arcCmd.hasE = false;
-                        arcCmd.targetX = (long)round(px);
-                        arcCmd.targetY = (long)round(py);
-                        arcCmd.isRelative = false;
-                        arcCmd.feedrate = feed;
-                        xQueueSend(motionQueue, &arcCmd, portMAX_DELAY);
+                            MotionCommand arcCmd;
+                            arcCmd.isHoming = false; arcCmd.isEmergency = false;
+                            arcCmd.ownerType = raw.srcType; arcCmd.ownerId = raw.srcId;
+                            arcCmd.hasX = true; arcCmd.hasY = true; arcCmd.hasZ = false; arcCmd.hasE = false;
+                            arcCmd.targetXmm = px;
+                            arcCmd.targetYmm = py;
+                            arcCmd.isRelative = false;
+                            arcCmd.feedrate = (float)feed;
+                            xQueueSend(motionQueue, &arcCmd, portMAX_DELAY);
                     }
                 }
             }
@@ -313,9 +377,9 @@ void parserTask(void *pvParameters) {
             }
             else if (line.startsWith("M114")) {
                 // Report Position
-                char response[128];
-                snprintf(response, sizeof(response), "X:%.2f Y:%.2f Z:%.2f E:%.2f\n",
-                    currentPosX / 100.0, currentPosY / 100.0, currentPosZ / 100.0, currentPosE / 100.0);
+                char response[256];
+                snprintf(response, sizeof(response), "X:%.4f Y:%.4f Z:%.4f E:%.4f\n",
+                    currentPosX / countsPerMM_X, currentPosY / countsPerMM_Y, currentPosZ / countsPerMM_Z, currentPosE / countsPerMM_E);
                 if (webServer) {
                     // Echo to serial and Telnet if connected
                     Serial.println(response);
@@ -408,17 +472,121 @@ void parserTask(void *pvParameters) {
                     Serial.println(response);
                 }
             }
+            else if (line.startsWith("M92")) {
+                // Set steps/counts per mm: M92 Xnnn Ynnn Znnn Enn
+                int xIdx = line.indexOf('X');
+                if (xIdx != -1) countsPerMM_X = line.substring(xIdx + 1).toFloat();
+                int yIdx = line.indexOf('Y');
+                if (yIdx != -1) countsPerMM_Y = line.substring(yIdx + 1).toFloat();
+                int zIdx = line.indexOf('Z');
+                if (zIdx != -1) countsPerMM_Z = line.substring(zIdx + 1).toFloat();
+                int eIdx2 = line.indexOf('E');
+                if (eIdx2 != -1) countsPerMM_E = line.substring(eIdx2 + 1).toFloat();
+                Serial.println("M92: updated counts per mm");
+            }
+            else if (line.startsWith("M301")) {
+                // Set PID tuning: M301 [X P... I... D...] [Y ...] [Z ...] [E ...]
+                // Parse P/I/D groups for each axis if present
+                auto parseAxisTunings = [&](char axis, float &kp, float &ki, float &kd) {
+                    int idx = line.indexOf(axis);
+                    if (idx != -1) {
+                        // substring from axis letter to end; parse tokens for P/I/D
+                        String rest = line.substring(idx + 1);
+                        int pIdx = rest.indexOf('P'); if (pIdx != -1) {
+                            kp = rest.substring(pIdx + 1).toFloat();
+                        }
+                        int iIdx = rest.indexOf('I'); if (iIdx != -1) {
+                            ki = rest.substring(iIdx + 1).toFloat();
+                        }
+                        int dIdx = rest.indexOf('D'); if (dIdx != -1) {
+                            kd = rest.substring(dIdx + 1).toFloat();
+                        }
+                        return true;
+                    }
+                    return false;
+                };
+
+                bool changed = false;
+                if (parseAxisTunings('X', pid_kp_x, pid_ki_x, pid_kd_x)) { pidX.setTunings(pid_kp_x, pid_ki_x, pid_kd_x); changed = true; }
+                if (parseAxisTunings('Y', pid_kp_y, pid_ki_y, pid_kd_y)) { pidY.setTunings(pid_kp_y, pid_ki_y, pid_kd_y); changed = true; }
+                if (parseAxisTunings('Z', pid_kp_z, pid_ki_z, pid_kd_z)) { pidZ.setTunings(pid_kp_z, pid_ki_z, pid_kd_z); changed = true; }
+                if (parseAxisTunings('E', pid_kp_e, pid_ki_e, pid_kd_e)) { pidE.setTunings(pid_kp_e, pid_ki_e, pid_kd_e); changed = true; }
+                if (changed) Serial.println("M301: PID tunings updated");
+            }
+            else if (line.startsWith("M503")) {
+                // Report settings
+                char buf[256];
+                snprintf(buf, sizeof(buf), "M92 X%.4f Y%.4f Z%.4f E%.4f\n", countsPerMM_X, countsPerMM_Y, countsPerMM_Z, countsPerMM_E);
+                Serial.print(buf);
+                if (webServer) webServer->sendTelnet(String(buf));
+                snprintf(buf, sizeof(buf), "PID X P%.4f I%.4f D%.4f\n", pid_kp_x, pid_ki_x, pid_kd_x);
+                Serial.print(buf); if (webServer) webServer->sendTelnet(String(buf));
+                snprintf(buf, sizeof(buf), "PID Y P%.4f I%.4f D%.4f\n", pid_kp_y, pid_ki_y, pid_kd_y);
+                Serial.print(buf); if (webServer) webServer->sendTelnet(String(buf));
+                snprintf(buf, sizeof(buf), "PID Z P%.4f I%.4f D%.4f\n", pid_kp_z, pid_ki_z, pid_kd_z);
+                Serial.print(buf); if (webServer) webServer->sendTelnet(String(buf));
+                snprintf(buf, sizeof(buf), "PID E P%.4f I%.4f D%.4f\n", pid_kp_e, pid_ki_e, pid_kd_e);
+                Serial.print(buf); if (webServer) webServer->sendTelnet(String(buf));
+            }
+            else if (line.startsWith("M500")) {
+                // Save settings to Preferences
+                Preferences prefs;
+                prefs.begin("cnc", false);
+                prefs.putFloat("cpm_x", countsPerMM_X);
+                prefs.putFloat("cpm_y", countsPerMM_Y);
+                prefs.putFloat("cpm_z", countsPerMM_Z);
+                prefs.putFloat("cpm_e", countsPerMM_E);
+                prefs.putFloat("pid_kp_x", pid_kp_x); prefs.putFloat("pid_ki_x", pid_ki_x); prefs.putFloat("pid_kd_x", pid_kd_x);
+                prefs.putFloat("pid_kp_y", pid_kp_y); prefs.putFloat("pid_ki_y", pid_ki_y); prefs.putFloat("pid_kd_y", pid_kd_y);
+                prefs.putFloat("pid_kp_z", pid_kp_z); prefs.putFloat("pid_ki_z", pid_ki_z); prefs.putFloat("pid_kd_z", pid_kd_z);
+                prefs.putFloat("pid_kp_e", pid_kp_e); prefs.putFloat("pid_ki_e", pid_ki_e); prefs.putFloat("pid_kd_e", pid_kd_e);
+                prefs.end();
+                Serial.println("Settings saved (M500)");
+            }
+            else if (line.startsWith("M501")) {
+                // Load settings from Preferences
+                Preferences prefs;
+                prefs.begin("cnc", true);
+                countsPerMM_X = prefs.getFloat("cpm_x", countsPerMM_X);
+                countsPerMM_Y = prefs.getFloat("cpm_y", countsPerMM_Y);
+                countsPerMM_Z = prefs.getFloat("cpm_z", countsPerMM_Z);
+                countsPerMM_E = prefs.getFloat("cpm_e", countsPerMM_E);
+                pid_kp_x = prefs.getFloat("pid_kp_x", pid_kp_x); pid_ki_x = prefs.getFloat("pid_ki_x", pid_ki_x); pid_kd_x = prefs.getFloat("pid_kd_x", pid_kd_x);
+                pid_kp_y = prefs.getFloat("pid_kp_y", pid_kp_y); pid_ki_y = prefs.getFloat("pid_ki_y", pid_ki_y); pid_kd_y = prefs.getFloat("pid_kd_y", pid_kd_y);
+                pid_kp_z = prefs.getFloat("pid_kp_z", pid_kp_z); pid_ki_z = prefs.getFloat("pid_ki_z", pid_ki_z); pid_kd_z = prefs.getFloat("pid_kd_z", pid_kd_z);
+                pid_kp_e = prefs.getFloat("pid_kp_e", pid_kp_e); pid_ki_e = prefs.getFloat("pid_ki_e", pid_ki_e); pid_kd_e = prefs.getFloat("pid_kd_e", pid_kd_e);
+                prefs.end();
+                // Apply loaded tunings to controllers
+                pidX.setTunings(pid_kp_x, pid_ki_x, pid_kd_x);
+                pidY.setTunings(pid_kp_y, pid_ki_y, pid_kd_y);
+                pidZ.setTunings(pid_kp_z, pid_ki_z, pid_kd_z);
+                pidE.setTunings(pid_kp_e, pid_ki_e, pid_kd_e);
+                Serial.println("Settings loaded (M501)");
+            }
             else if (line.startsWith("M3") || line.startsWith("M5")) {
                 // Spindle / Laser on/off. M3 S<0-255> to set power, M5 to stop
                 if (line.startsWith("M5")) {
                     if (PIN_SPINDLE >= 0) ledcWrite(PWM_CHAN_SPINDLE, 0);
                     if (PIN_LASER >= 0) ledcWrite(PWM_CHAN_LASER, 0);
+                    // update runtime state and persist
+                    spindlePower = 0; laserPower = 0;
+                    Preferences prefs; prefs.begin("cnc", false);
+                    prefs.putInt("spindle_p", 0);
+                    prefs.putInt("laser_p", 0);
+                    prefs.end();
                 } else {
                     int sIdx = line.indexOf('S');
                     int val = 255;
                     if (sIdx != -1) val = line.substring(sIdx + 1).toInt();
-                    if (PIN_SPINDLE >= 0) ledcWrite(PWM_CHAN_SPINDLE, constrain(val, 0, 255));
-                    if (PIN_LASER >= 0) ledcWrite(PWM_CHAN_LASER, constrain(val, 0, 255));
+                    int v = constrain(val, 0, 255);
+                    if (PIN_SPINDLE >= 0) ledcWrite(PWM_CHAN_SPINDLE, v);
+                    if (PIN_LASER >= 0) ledcWrite(PWM_CHAN_LASER, v);
+                    // update runtime state and persist
+                    spindlePower = v; laserPower = v;
+                    Preferences prefs; prefs.begin("cnc", false);
+                    prefs.putInt("spindle_p", spindlePower);
+                    prefs.putInt("laser_p", laserPower);
+                    prefs.end();
                 }
             }
         }
@@ -446,6 +614,8 @@ void controlTask(void *pvParameters) {
             motorY.setSpeed(0);
             motorZ.setSpeed(0);
             motorE.setSpeed(0);
+            // Ensure spindle/laser are off while halted
+            disableSpindleAndLaser();
             vTaskDelay(100 / portTICK_PERIOD_MS);
             continue;
         }
@@ -458,18 +628,24 @@ void controlTask(void *pvParameters) {
                 isHalted = true;
                 haltReason = "Emergency Stop (M112)";
                 Serial.println("Emergency stop received");
+                // Ensure spindle/laser are disabled immediately
+                disableSpindleAndLaser();
                 if (webServer) webServer->sendResponseToClient(cmd.ownerType, cmd.ownerId, String("ok:emergency"));
                 // continue to next command
                 continue;
             }
 
-            // Claim executor if not busy
+            // Claim executor if not busy (protected by global executor spinlock)
+            portENTER_CRITICAL(&g_executorMux);
             if (!executorBusy) {
                 executorBusy = true;
                 executorOwnerType = cmd.ownerType;
                 executorOwnerId = cmd.ownerId;
+                // controlTask claims executor for real; clear any push-time reservation
+                executorReservedUntil = 0;
                 Serial.printf("controlTask: claimed executor for %d/%d\n", cmd.ownerType, cmd.ownerId);
             }
+            portEXIT_CRITICAL(&g_executorMux);
 
             // Safety: reject commands from other owners (shouldn't be queued by web_server)
             if (executorBusy && !(executorOwnerType == cmd.ownerType && executorOwnerId == cmd.ownerId)) {
@@ -485,15 +661,15 @@ void controlTask(void *pvParameters) {
                 pidX.reset(); pidY.reset(); pidZ.reset(); pidE.reset();
             } else {
                 if (absolutePositioning) {
-                    if (cmd.hasX) { setpointX = cmd.targetX * 100; currentPosX = setpointX; }
-                    if (cmd.hasY) { setpointY = cmd.targetY * 100; currentPosY = setpointY; }
-                    if (cmd.hasZ) { setpointZ = cmd.targetZ * 100; currentPosZ = setpointZ; }
-                    if (cmd.hasE) { setpointE = cmd.targetE * 100; currentPosE = setpointE; }
+                    if (cmd.hasX) { setpointX = (long)round(cmd.targetXmm * countsPerMM_X); currentPosX = setpointX; }
+                    if (cmd.hasY) { setpointY = (long)round(cmd.targetYmm * countsPerMM_Y); currentPosY = setpointY; }
+                    if (cmd.hasZ) { setpointZ = (long)round(cmd.targetZmm * countsPerMM_Z); currentPosZ = setpointZ; }
+                    if (cmd.hasE) { setpointE = (long)round(cmd.targetEmm * countsPerMM_E); currentPosE = setpointE; }
                 } else {
-                    if (cmd.hasX) { setpointX += cmd.targetX * 100; currentPosX = setpointX; }
-                    if (cmd.hasY) { setpointY += cmd.targetY * 100; currentPosY = setpointY; }
-                    if (cmd.hasZ) { setpointZ += cmd.targetZ * 100; currentPosZ = setpointZ; }
-                    if (cmd.hasE) { setpointE += cmd.targetE * 100; currentPosE = setpointE; }
+                    if (cmd.hasX) { setpointX += (long)round(cmd.targetXmm * countsPerMM_X); currentPosX = setpointX; }
+                    if (cmd.hasY) { setpointY += (long)round(cmd.targetYmm * countsPerMM_Y); currentPosY = setpointY; }
+                    if (cmd.hasZ) { setpointZ += (long)round(cmd.targetZmm * countsPerMM_Z); currentPosZ = setpointZ; }
+                    if (cmd.hasE) { setpointE += (long)round(cmd.targetEmm * countsPerMM_E); currentPosE = setpointE; }
                 }
             }
 
@@ -514,17 +690,55 @@ void controlTask(void *pvParameters) {
                 if (totalDistanceCounts > 0.0f) {
                     // distance in mm = counts / 100.0
                     float dist_mm = totalDistanceCounts / 100.0f;
+                    // apply run speed multiplier
+                    float effectiveFeed = (float)cmd.feedrate * runSpeedMultiplier;
+                    if (effectiveFeed < 0.001f) effectiveFeed = 0.001f;
                     // feedrate is mm per minute -> convert to ms: durationMs = dist_mm (mm) / (feedrate mm/min) * 60000 ms/min
-                    trajDurationMs = (dist_mm / (float)cmd.feedrate) * 60000.0f;
+                    trajDurationMs = (dist_mm / effectiveFeed) * 60000.0f;
                     if (trajDurationMs < 1.0f) trajDurationMs = 1.0f;
                     useTrajectory = true;
                 }
             }
 
+            // Reset pause accounting for this command
+            unsigned long pauseAccumMs = 0;
+            unsigned long pauseStartMs = 0;
+
             // Execute command until completion or timeout/halt
             unsigned long startTime = millis();
             bool finished = false;
             while (!isHalted) {
+                // Handle run stop: immediate cancel of this command
+                if (runStopped) {
+                    // Stop motors, clear queues and release executor
+                    motorX.setSpeed(0); motorY.setSpeed(0); motorZ.setSpeed(0); motorE.setSpeed(0);
+                    // Clear pending motion commands
+                    if (motionQueue != NULL) xQueueReset(motionQueue);
+                    if (commandQueue != NULL) xQueueReset(commandQueue);
+                    if (webServer) webServer->sendResponseToClient(cmd.ownerType, cmd.ownerId, String("ok:stopped"));
+                    // release ownership (protected)
+                    portENTER_CRITICAL(&g_executorMux);
+                    executorBusy = false; executorOwnerType = SRC_SERIAL; executorOwnerId = -1;
+                    portEXIT_CRITICAL(&g_executorMux);
+                    runStopped = false; // clear
+                    finished = false;
+                    break;
+                }
+
+                // Handle pause: park motors but keep ownership and adjust pause accounting
+                if (runPaused) {
+                    // record pause start if not already
+                    if (pauseStartMs == 0) pauseStartMs = millis();
+                    motorX.setSpeed(0); motorY.setSpeed(0); motorZ.setSpeed(0); motorE.setSpeed(0);
+                    vTaskDelay(10 / portTICK_PERIOD_MS);
+                    continue; // stay in pause loop until unpaused or stopped
+                } else {
+                    // if we were paused, accumulate pause duration
+                    if (pauseStartMs != 0) {
+                        pauseAccumMs += (millis() - pauseStartMs);
+                        pauseStartMs = 0;
+                    }
+                }
                 // Determine desired setpoints (if using trajectory, compute time-based desired positions)
                 long desiredX = setpointX;
                 long desiredY = setpointY;
@@ -545,6 +759,8 @@ void controlTask(void *pvParameters) {
                         long dev = labs(encX - desiredX);
                         if (dev > POSITION_HALT_TOLERANCE_COUNTS) {
                             isHalted = true; haltReason = "X position deviation";
+                            // Immediately disable spindle/laser for safety
+                            disableSpindleAndLaser();
                             if (webServer) { webServer->broadcastError(haltReason); webServer->sendResponseToClient(cmd.ownerType, cmd.ownerId, String("error:halt:X_position_deviation")); }
                             break;
                         } else if (dev > POSITION_WARN_TOLERANCE_COUNTS) {
@@ -558,6 +774,7 @@ void controlTask(void *pvParameters) {
                         long dev = labs(encY - desiredY);
                         if (dev > POSITION_HALT_TOLERANCE_COUNTS) {
                             isHalted = true; haltReason = "Y position deviation";
+                            disableSpindleAndLaser();
                             if (webServer) { webServer->broadcastError(haltReason); webServer->sendResponseToClient(cmd.ownerType, cmd.ownerId, String("error:halt:Y_position_deviation")); }
                             break;
                         } else if (dev > POSITION_WARN_TOLERANCE_COUNTS) {
@@ -571,6 +788,7 @@ void controlTask(void *pvParameters) {
                         long dev = labs(encZ - desiredZ);
                         if (dev > POSITION_HALT_TOLERANCE_COUNTS) {
                             isHalted = true; haltReason = "Z position deviation";
+                            disableSpindleAndLaser();
                             if (webServer) { webServer->broadcastError(haltReason); webServer->sendResponseToClient(cmd.ownerType, cmd.ownerId, String("error:halt:Z_position_deviation")); }
                             break;
                         } else if (dev > POSITION_WARN_TOLERANCE_COUNTS) {
@@ -584,6 +802,7 @@ void controlTask(void *pvParameters) {
                         long dev = labs(encE - desiredE);
                         if (dev > POSITION_HALT_TOLERANCE_COUNTS) {
                             isHalted = true; haltReason = "E position deviation";
+                            disableSpindleAndLaser();
                             if (webServer) { webServer->broadcastError(haltReason); webServer->sendResponseToClient(cmd.ownerType, cmd.ownerId, String("error:halt:E_position_deviation")); }
                             break;
                         } else if (dev > POSITION_WARN_TOLERANCE_COUNTS) {
@@ -600,6 +819,9 @@ void controlTask(void *pvParameters) {
                 int outY = pidY.compute(desiredY, encY);
                 int outZ = pidZ.compute(desiredZ, encZ);
                 int outE = pidE.compute(desiredE, encE);
+
+                // Publish outputs into diagnostic globals before applying
+                motorOutX = outX; motorOutY = outY; motorOutZ = outZ; motorOutE = outE;
 
                 // Apply outputs
                 motorX.setSpeed(outX);
@@ -619,40 +841,80 @@ void controlTask(void *pvParameters) {
                 if (cmd.hasX) {
                     long d = abs(setpointX - encX);
                     if (d > FOLLOWING_ERROR_WARN && webServer) webServer->sendResponseToClient(cmd.ownerType, cmd.ownerId, String("warn:X_following"));
-                    if (d > FOLLOWING_ERROR_HALT) { isHalted = true; haltReason = "X following error"; if (webServer) { webServer->broadcastError(haltReason); webServer->sendResponseToClient(cmd.ownerType, cmd.ownerId, String("error:halt:X_following")); } break; }
+                    if (d > FOLLOWING_ERROR_HALT) {
+                        isHalted = true; haltReason = "X following error";
+                        disableSpindleAndLaser();
+                        if (webServer) { webServer->broadcastError(haltReason); webServer->sendResponseToClient(cmd.ownerType, cmd.ownerId, String("error:halt:X_following")); }
+                        break;
+                    }
                 }
                 if (cmd.hasY) {
                     long d = abs(setpointY - encY);
                     if (d > FOLLOWING_ERROR_WARN && webServer) webServer->sendResponseToClient(cmd.ownerType, cmd.ownerId, String("warn:Y_following"));
-                    if (d > FOLLOWING_ERROR_HALT) { isHalted = true; haltReason = "Y following error"; if (webServer) { webServer->broadcastError(haltReason); webServer->sendResponseToClient(cmd.ownerType, cmd.ownerId, String("error:halt:Y_following")); } break; }
+                    if (d > FOLLOWING_ERROR_HALT) {
+                        isHalted = true; haltReason = "Y following error";
+                        disableSpindleAndLaser();
+                        if (webServer) { webServer->broadcastError(haltReason); webServer->sendResponseToClient(cmd.ownerType, cmd.ownerId, String("error:halt:Y_following")); }
+                        break;
+                    }
                 }
                 if (cmd.hasZ) {
                     long d = abs(setpointZ - encZ);
                     if (d > FOLLOWING_ERROR_WARN && webServer) webServer->sendResponseToClient(cmd.ownerType, cmd.ownerId, String("warn:Z_following"));
-                    if (d > FOLLOWING_ERROR_HALT) { isHalted = true; haltReason = "Z following error"; if (webServer) { webServer->broadcastError(haltReason); webServer->sendResponseToClient(cmd.ownerType, cmd.ownerId, String("error:halt:Z_following")); } break; }
+                    if (d > FOLLOWING_ERROR_HALT) {
+                        isHalted = true; haltReason = "Z following error";
+                        disableSpindleAndLaser();
+                        if (webServer) { webServer->broadcastError(haltReason); webServer->sendResponseToClient(cmd.ownerType, cmd.ownerId, String("error:halt:Z_following")); }
+                        break;
+                    }
                 }
                 if (cmd.hasE) {
                     long d = abs(setpointE - encE);
                     if (d > FOLLOWING_ERROR_WARN && webServer) webServer->sendResponseToClient(cmd.ownerType, cmd.ownerId, String("warn:E_following"));
-                    if (d > FOLLOWING_ERROR_HALT) { isHalted = true; haltReason = "E following error"; if (webServer) { webServer->broadcastError(haltReason); webServer->sendResponseToClient(cmd.ownerType, cmd.ownerId, String("error:halt:E_following")); } break; }
+                    if (d > FOLLOWING_ERROR_HALT) {
+                        isHalted = true; haltReason = "E following error";
+                        disableSpindleAndLaser();
+                        if (webServer) { webServer->broadcastError(haltReason); webServer->sendResponseToClient(cmd.ownerType, cmd.ownerId, String("error:halt:E_following")); }
+                        break;
+                    }
                 }
 
                 // Stall warnings and halts (no encoder change while motor commanded)
                 if (abs(outX) >= MIN_MOTOR_COMMAND) {
                     if ((now - lastEncChangeX) > STALL_WARNING_MS && webServer) webServer->sendResponseToClient(cmd.ownerType, cmd.ownerId, String("warn:X_no_movement"));
-                    if ((now - lastEncChangeX) > STALL_TIMEOUT_MS) { isHalted = true; haltReason = "X Axis Stall Detected"; if (webServer) { webServer->broadcastError(haltReason); webServer->sendResponseToClient(cmd.ownerType, cmd.ownerId, String("error:halt:X_no_movement")); } break; }
+                    if ((now - lastEncChangeX) > STALL_TIMEOUT_MS) {
+                        isHalted = true; haltReason = "X Axis Stall Detected";
+                        disableSpindleAndLaser();
+                        if (webServer) { webServer->broadcastError(haltReason); webServer->sendResponseToClient(cmd.ownerType, cmd.ownerId, String("error:halt:X_no_movement")); }
+                        break;
+                    }
                 }
                 if (abs(outY) >= MIN_MOTOR_COMMAND) {
                     if ((now - lastEncChangeY) > STALL_WARNING_MS && webServer) webServer->sendResponseToClient(cmd.ownerType, cmd.ownerId, String("warn:Y_no_movement"));
-                    if ((now - lastEncChangeY) > STALL_TIMEOUT_MS) { isHalted = true; haltReason = "Y Axis Stall Detected"; if (webServer) { webServer->broadcastError(haltReason); webServer->sendResponseToClient(cmd.ownerType, cmd.ownerId, String("error:halt:Y_no_movement")); } break; }
+                    if ((now - lastEncChangeY) > STALL_TIMEOUT_MS) {
+                        isHalted = true; haltReason = "Y Axis Stall Detected";
+                        disableSpindleAndLaser();
+                        if (webServer) { webServer->broadcastError(haltReason); webServer->sendResponseToClient(cmd.ownerType, cmd.ownerId, String("error:halt:Y_no_movement")); }
+                        break;
+                    }
                 }
                 if (abs(outZ) >= MIN_MOTOR_COMMAND) {
                     if ((now - lastEncChangeZ) > STALL_WARNING_MS && webServer) webServer->sendResponseToClient(cmd.ownerType, cmd.ownerId, String("warn:Z_no_movement"));
-                    if ((now - lastEncChangeZ) > STALL_TIMEOUT_MS) { isHalted = true; haltReason = "Z Axis Stall Detected"; if (webServer) { webServer->broadcastError(haltReason); webServer->sendResponseToClient(cmd.ownerType, cmd.ownerId, String("error:halt:Z_no_movement")); } break; }
+                    if ((now - lastEncChangeZ) > STALL_TIMEOUT_MS) {
+                        isHalted = true; haltReason = "Z Axis Stall Detected";
+                        disableSpindleAndLaser();
+                        if (webServer) { webServer->broadcastError(haltReason); webServer->sendResponseToClient(cmd.ownerType, cmd.ownerId, String("error:halt:Z_no_movement")); }
+                        break;
+                    }
                 }
                 if (abs(outE) >= MIN_MOTOR_COMMAND) {
                     if ((now - lastEncChangeE) > STALL_WARNING_MS && webServer) webServer->sendResponseToClient(cmd.ownerType, cmd.ownerId, String("warn:E_no_movement"));
-                    if ((now - lastEncChangeE) > STALL_TIMEOUT_MS) { isHalted = true; haltReason = "E Axis Stall Detected"; if (webServer) { webServer->broadcastError(haltReason); webServer->sendResponseToClient(cmd.ownerType, cmd.ownerId, String("error:halt:E_no_movement")); } break; }
+                    if ((now - lastEncChangeE) > STALL_TIMEOUT_MS) {
+                        isHalted = true; haltReason = "E Axis Stall Detected";
+                        disableSpindleAndLaser();
+                        if (webServer) { webServer->broadcastError(haltReason); webServer->sendResponseToClient(cmd.ownerType, cmd.ownerId, String("error:halt:E_no_movement")); }
+                        break;
+                    }
                 }
 
                 // Check finished
@@ -666,6 +928,8 @@ void controlTask(void *pvParameters) {
                 if ((now - startTime) > COMMAND_EXECUTE_TIMEOUT_MS) {
                     isHalted = true;
                     haltReason = "Command timeout";
+                    // Turn off spindle/laser on timeout
+                    disableSpindleAndLaser();
                     if (webServer) { webServer->broadcastError(haltReason); webServer->sendResponseToClient(cmd.ownerType, cmd.ownerId, String("error:halt:timeout")); }
                     break;
                 }
@@ -705,11 +969,13 @@ void controlTask(void *pvParameters) {
                 continue;
             }
 
-            // release executor
+            // release executor (protected)
             Serial.printf("controlTask: releasing executor from %d/%d\n", executorOwnerType, executorOwnerId);
+            portENTER_CRITICAL(&g_executorMux);
             executorBusy = false;
             executorOwnerType = SRC_SERIAL;
             executorOwnerId = -1;
+            portEXIT_CRITICAL(&g_executorMux);
         }
 
         // Small scheduling delay (keep loop predictable)
@@ -735,13 +1001,21 @@ void setup() {
         pinMode(PIN_SPINDLE, OUTPUT);
         ledcSetup(PWM_CHAN_SPINDLE, PWM_FREQ, PWM_RES);
         ledcAttachPin(PIN_SPINDLE, PWM_CHAN_SPINDLE);
-        ledcWrite(PWM_CHAN_SPINDLE, 0);
+        // Restore persisted spindle power (if any)
+        Preferences prefs; prefs.begin("cnc", true);
+        spindlePower = prefs.getInt("spindle_p", 0);
+        prefs.end();
+        ledcWrite(PWM_CHAN_SPINDLE, constrain(spindlePower, 0, 255));
     }
     if (PIN_LASER >= 0) {
         pinMode(PIN_LASER, OUTPUT);
         ledcSetup(PWM_CHAN_LASER, PWM_FREQ, PWM_RES);
         ledcAttachPin(PIN_LASER, PWM_CHAN_LASER);
-        ledcWrite(PWM_CHAN_LASER, 0);
+        // Restore persisted laser power (if any)
+        Preferences lprefs; lprefs.begin("cnc", true);
+        laserPower = lprefs.getInt("laser_p", 0);
+        lprefs.end();
+        ledcWrite(PWM_CHAN_LASER, constrain(laserPower, 0, 255));
     }
 
     // Init Encoders (Use PULLUP to prevent floating noise)

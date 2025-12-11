@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Files</title><link rel="stylesheet" href="css/style.css"></head><body>
+<div style="padding:12px; max-width:800px; margin:auto;">
+<h1>Files</h1>
+<div style="margin-bottom:8px;">
+  Storage: <select id="storage-select"><option value="littlefs">LittleFS (/gcode)</option><option value="sd">SD Card</option></select>
+  <button id="refresh">Refresh</button>
+</div>
+<ul id="file-list"></ul>
+<div style="margin-top:12px; display:flex; gap:8px;">
+  <button id="print">Print Selected</button>
+  <button id="download">Download</button>
+  <button id="delete">Delete Selected</button>
+</div>
+<div style="margin-top:12px;"><label><input type="checkbox" id="reserve-exec"> Reserve executor for print</label></div>
+<div style="margin-top:12px; padding:8px; border:1px solid #444; background:#0f0f0f; color:#ddd;">
+  <strong>Job Status:</strong> <span id="job-filename">(none)</span> — <span id="job-state">idle</span>
+  <div style="margin-top:6px; font-size:0.9em; color:#999;">Events: <span id="job-events">0</span></div>
+</div>
+</div>
+</div>
+</div>
+<script>
+let selected = null;
+function refresh() {
+  const storage = document.getElementById('storage-select').value;
+  fetch('/api/files?storage=' + encodeURIComponent(storage)).then(r=>r.json()).then(list=>{
+    const ul = document.getElementById('file-list'); ul.innerHTML='';
+    list.forEach(fn=>{
+      const li = document.createElement('li');
+      li.innerText = fn.name || fn;
+      li.dataset.storage = fn.storage || storage;
+      li.style.cursor = 'pointer';
+      li.onclick = ()=>{ Array.from(ul.children).forEach(ch=>ch.style.background=''); li.style.background='#333'; selected=li.innerText; };
+      ul.appendChild(li);
+    });
+  }).catch(e=>{ alert('Failed to load files'); });
+}
+document.getElementById('refresh').addEventListener('click', refresh);
+document.getElementById('print').addEventListener('click', ()=>{
+  if(!selected) { alert('Select a file'); return; }
+  const reserve = document.getElementById('reserve-exec') && document.getElementById('reserve-exec').checked;
+  const storage = document.getElementById('storage-select').value;
+  fetch('/api/job/start', { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ filename: selected, reserve: reserve, storage: storage }) })
+    .then(r=>r.json()).then(j=>{ if (j && j.reserved) alert('Started and reserved executor: '+selected); else alert('Started: '+selected); }).catch(e=>{ alert('Failed to start'); });
+});
+document.getElementById('download').addEventListener('click', ()=>{
+  if(!selected) { alert('Select a file'); return; }
+  const storage = document.getElementById('storage-select').value;
+  const url = `/api/files/download?storage=${encodeURIComponent(storage)}&filename=${encodeURIComponent(selected)}`;
+  fetch(url).then(r=>{
+    if (!r.ok) { alert('Download failed'); return; }
+    return r.blob();
+  }).then(blob=>{
+    if (!blob) return;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = selected; document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+  }).catch(e=>{ alert('Download error'); });
+});
+
+// Delete support via LittleFS/SD API
+document.getElementById('delete').addEventListener('click', ()=>{
+  if(!selected) { alert('Select a file'); return; }
+  const storage = document.getElementById('storage-select').value;
+  if (!confirm('Delete ' + selected + ' from ' + storage + '?')) return;
+  fetch('/api/files/delete', { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ storage: storage, filename: selected }) })
+    .then(r=>r.json()).then(j=>{ if (j && j.success) { alert('Deleted'); refresh(); } else alert('Delete failed'); }).catch(e=>{ alert('Delete failed'); });
+});
+// delete support via LittleFS API (server-side) - not implemented server-side here
+// provide simple hint
+document.getElementById('delete').addEventListener('click', ()=>{ alert('Delete not implemented'); });
+refresh();
+
+// WebSocket listener for job lifecycle events
+try {
+  const ws = new WebSocket('ws://' + window.location.hostname + ':81/');
+  let eventCount = 0;
+  ws.onmessage = function(ev) {
+    const dataStr = (ev.data || '').toString().trim();
+    if (!dataStr.startsWith('{')) return;
+    let parsed = null;
+    try { parsed = JSON.parse(dataStr); } catch (e) { return; }
+    if (parsed.type === 'job_event') {
+      eventCount++;
+      document.getElementById('job-events').innerText = eventCount;
+      const fname = parsed.filename || '(unknown)';
+      const st = parsed.event || '(?)';
+      document.getElementById('job-filename').innerText = fname;
+      document.getElementById('job-state').innerText = st;
+      // If job finished/stopped/error, refresh file list so UI stays in sync
+      if (st === 'finished' || st === 'stopped' || st === 'error') refresh();
+    }
+  };
+} catch (e) {
+  console.warn('Files page: WebSocket not available', e);
+}
+</script></body></html>

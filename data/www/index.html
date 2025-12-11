@@ -12,9 +12,12 @@
 <body>
     <div id="app">
         <div id="sidebar">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
                 <h1>Encoder3D</h1>
-                <a href="/wifi.html" style="color: #007acc; text-decoration: none; font-size: 0.9em;">⚙️ Setup</a>
+                <div style="display:flex; gap:8px; align-items:center;">
+                    <a href="/wifi.html" style="color: #007acc; text-decoration: none; font-size: 0.9em;">⚙️ Setup</a>
+                    <a href="/config.html" style="color: #007acc; text-decoration: none; font-size: 0.9em;">🛠️ Config</a>
+                </div>
             </div>
             <div class="panel">
                 <h2>Status <span id="ws-status" style="font-size: 0.6em; color: #f48771;">(Disconnected)</span></h2>
@@ -23,6 +26,10 @@
                     <p>Y: <span id="pos-y">0.00</span> mm <small style="color:#999">(set: <span id="set-y">0.00</span> mm, last move: <span id="lastmove-y">0ms</span>)</small></p>
                     <p>Z: <span id="pos-z">0.00</span> mm <small style="color:#999">(set: <span id="set-z">0.00</span> mm, last move: <span id="lastmove-z">0ms</span>)</small></p>
                     <p>E: <span id="pos-e">0.00</span> mm <small style="color:#999">(set: <span id="set-e">0.00</span> mm, last move: <span id="lastmove-e">0ms</span>)</small></p>
+                    <div style="margin-top:6px; font-size:0.9em; color:#ccc">
+                        <div>Motor Outputs: X=<span id="mot-x">0</span> Y=<span id="mot-y">0</span> Z=<span id="mot-z">0</span> E=<span id="mot-e">0</span></div>
+                        <div>Encoder Counts: X=<span id="enc-x">0</span> Y=<span id="enc-y">0</span> Z=<span id="enc-z">0</span> E=<span id="enc-e">0</span></div>
+                    </div>
                 </div>
                 <div id="diagnostics" style="margin-top:8px; border-top:1px solid #333; padding-top:8px;">
                     <p>Executor: <strong id="exec-busy">idle</strong> <small id="exec-owner" style="color:#999">(owner: -)</small></p>
@@ -39,26 +46,24 @@
                 <p>Bed: <span id="temp-bed">0</span>°C / <input type="number" id="target-bed" value="0" style="width: 50px"></p>
                 <button onclick="setTemps()">Set Temps</button>
             </div>
-            <div class="panel">
-                <h2>Configuration</h2>
-                <div style="font-size:0.9em; color:#aaa; margin-bottom:6px">Steps / Counts per mm</div>
-                <p>X: <input id="cfg-cpm-x" type="number" step="0.0001" style="width:100px"> </p>
-                <p>Y: <input id="cfg-cpm-y" type="number" step="0.0001" style="width:100px"> </p>
-                <p>Z: <input id="cfg-cpm-z" type="number" step="0.0001" style="width:100px"> </p>
-                <p>E: <input id="cfg-cpm-e" type="number" step="0.0001" style="width:100px"> </p>
-                <div style="font-size:0.9em; color:#aaa; margin-top:6px">PID Tunings (P I D)</div>
-                <p>X: <input id="cfg-pid-x-p" type="number" step="0.0001" style="width:80px"> <input id="cfg-pid-x-i" type="number" step="0.0001" style="width:80px"> <input id="cfg-pid-x-d" type="number" step="0.0001" style="width:80px"></p>
-                <p>Y: <input id="cfg-pid-y-p" type="number" step="0.0001" style="width:80px"> <input id="cfg-pid-y-i" type="number" step="0.0001" style="width:80px"> <input id="cfg-pid-y-d" type="number" step="0.0001" style="width:80px"></p>
-                <p>Z: <input id="cfg-pid-z-p" type="number" step="0.0001" style="width:80px"> <input id="cfg-pid-z-i" type="number" step="0.0001" style="width:80px"> <input id="cfg-pid-z-d" type="number" step="0.0001" style="width:80px"></p>
-                <p>E: <input id="cfg-pid-e-p" type="number" step="0.0001" style="width:80px"> <input id="cfg-pid-e-i" type="number" step="0.0001" style="width:80px"> <input id="cfg-pid-e-d" type="number" step="0.0001" style="width:80px"></p>
-                <div style="font-size:0.9em; color:#aaa; margin-top:6px">Max Feedrates (mm/min)</div>
-                <p>X: <input id="cfg-maxf-x" type="number" step="1" style="width:80px"> Y: <input id="cfg-maxf-y" id="cfg-maxf-y" type="number" step="1" style="width:80px"></p>
-                <p>Z: <input id="cfg-maxf-z" type="number" step="1" style="width:80px"> E: <input id="cfg-maxf-e" type="number" step="1" style="width:80px"></p>
-                <div style="margin-top:8px; display:flex; gap:8px;">
-                    <button onclick="loadConfig()">Load</button>
-                    <button onclick="saveConfig()">Save</button>
+                <div class="panel">
+                    <h2>Run</h2>
+                    <div style="display:flex; gap:8px; margin-bottom:8px;">
+                        <button id="btn-play">Play</button>
+                        <button id="btn-pause">Pause</button>
+                        <button id="btn-stop">Stop</button>
+                    </div>
+                    <div style="margin-bottom:6px">Speed: <input id="run-speed" type="range" min="5" max="500" value="100"> <span id="run-speed-val">100%</span></div>
                 </div>
-            </div>
+                <div class="panel">
+                    <h2>Spindle / Laser</h2>
+                    <div style="margin-bottom:8px">
+                        <div>Spindle: <input id="spindle-power" type="range" min="0" max="255" value="0"> <span id="spindle-val">0</span> <button id="spindle-off">Off</button></div>
+                    </div>
+                    <div>
+                        <div>Laser: <input id="laser-power" type="range" min="0" max="255" value="0"> <span id="laser-val">0</span> <button id="laser-off">Off</button></div>
+                    </div>
+                </div>
             <div class="panel">
                 <h2>Manual Control</h2>
                 <button onclick="sendGCode('G28')">Home All</button>

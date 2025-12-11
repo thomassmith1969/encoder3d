@@ -23,6 +23,7 @@ class ThermalManager;
 #define SRC_SERIAL 0
 #define SRC_WEBSOCKET 1
 #define SRC_TELNET 2
+#define SRC_JOB 3
 
 // Raw command from a client
 struct RawCommand {
@@ -49,12 +50,45 @@ extern float countsPerMM_Y;
 extern float countsPerMM_Z;
 extern float countsPerMM_E;
 
+// Global executor spinlock (shared across translation units)
+extern portMUX_TYPE g_executorMux;
+
 extern float pid_kp_x; extern float pid_ki_x; extern float pid_kd_x;
 extern float pid_kp_y; extern float pid_ki_y; extern float pid_kd_y;
 extern float pid_kp_z; extern float pid_ki_z; extern float pid_kd_z;
 extern float pid_kp_e; extern float pid_ki_e; extern float pid_kd_e;
 
 extern int maxFeedrateX; extern int maxFeedrateY; extern int maxFeedrateZ; extern int maxFeedrateE;
+
+// Run controls (pause/play/stop and speed multiplier)
+extern volatile bool runPaused;
+extern volatile bool runStopped;
+extern volatile int runSpeedPercent; // 5..500
+extern volatile float runSpeedMultiplier; // derived from percent
+
+// Spindle / Laser runtime state
+extern volatile int spindlePower; // 0..255
+extern volatile int laserPower; // 0..255
+
+// Global instance (defined in main.cpp)
+extern class WebServerManager* webServer;
+
+// Expose queues so admin endpoints can clear them if needed
+extern QueueHandle_t motionQueue;
+extern QueueHandle_t commandQueue;
+
+// Reservation state set by web_server when push-time reservation is made
+extern volatile unsigned long executorReservedUntil;
+
+// Job state exported so parser can tag streamed input as job-origin
+extern volatile bool jobActive;
+
+// Job event broadcast API (member on WebServerManager)
+
+// Storage selection for file operations
+#define STORAGE_LITTLEFS 0
+#define STORAGE_SD 1
+
 
 // Expose PID controllers declared in main
 extern PIDController pidX;
@@ -91,9 +125,12 @@ public:
     void broadcastStatus(float x, float y, float z, float e,
                          float extTemp, float bedTemp, float extTarget, float bedTarget,
                          float setX, float setY, float setZ, float setE,
-                         unsigned long lastMoveX, unsigned long lastMoveY, unsigned long lastMoveZ, unsigned long lastMoveE);
+                         unsigned long lastMoveX, unsigned long lastMoveY, unsigned long lastMoveZ, unsigned long lastMoveE,
+                         int motorOutX, int motorOutY, int motorOutZ, int motorOutE,
+                         long encCountsX, long encCountsY, long encCountsZ, long encCountsE);
     void broadcastError(String message);
     void broadcastWarning(String message);
+    void broadcastJobEvent(const char* event, const char* filename, const char* storage, int progress = -1);
     void sendTelnet(String message);
     // Returns empty string on success, or 'busy' when the executor is owned by a different client.
     String pushClientCommand(const RawCommand &cmd); // Check ownership and push to queue

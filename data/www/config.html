@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Encoder3D Configuration</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div style="padding:12px; max-width:900px; margin:auto;">
+        <h1>Configuration</h1>
+        <div style="font-size:0.9em; color:#aaa; margin-bottom:6px">Steps / Counts per mm</div>
+        <p>X: <input id="cfg-cpm-x" type="number" step="0.0001" style="width:100px"> </p>
+        <p>Y: <input id="cfg-cpm-y" type="number" step="0.0001" style="width:100px"> </p>
+        <p>Z: <input id="cfg-cpm-z" type="number" step="0.0001" style="width:100px"> </p>
+        <p>E: <input id="cfg-cpm-e" type="number" step="0.0001" style="width:100px"> </p>
+        <div style="font-size:0.9em; color:#aaa; margin-top:6px">PID Tunings (P I D)</div>
+        <p>X: <input id="cfg-pid-x-p" type="number" step="0.0001" style="width:80px"> <input id="cfg-pid-x-i" type="number" step="0.0001" style="width:80px"> <input id="cfg-pid-x-d" type="number" step="0.0001" style="width:80px"></p>
+        <p>Y: <input id="cfg-pid-y-p" type="number" step="0.0001" style="width:80px"> <input id="cfg-pid-y-i" type="number" step="0.0001" style="width:80px"> <input id="cfg-pid-y-d" type="number" step="0.0001" style="width:80px"></p>
+        <p>Z: <input id="cfg-pid-z-p" type="number" step="0.0001" style="width:80px"> <input id="cfg-pid-z-i" type="number" step="0.0001" style="width:80px"> <input id="cfg-pid-z-d" type="number" step="0.0001" style="width:80px"></p>
+        <p>E: <input id="cfg-pid-e-p" type="number" step="0.0001" style="width:80px"> <input id="cfg-pid-e-i" type="number" step="0.0001" style="width:80px"> <input id="cfg-pid-e-d" type="number" step="0.0001" style="width:80px"></p>
+        <div style="font-size:0.9em; color:#aaa; margin-top:6px">Max Feedrates (mm/min)</div>
+        <p>X: <input id="cfg-maxf-x" type="number" step="1" style="width:80px"> Y: <input id="cfg-maxf-y" type="number" step="1" style="width:80px"></p>
+        <p>Z: <input id="cfg-maxf-z" type="number" step="1" style="width:80px"> E: <input id="cfg-maxf-e" type="number" step="1" style="width:80px"></p>
+        <div style="margin-top:8px; display:flex; gap:8px;">
+            <button id="cfg-load">Load</button>
+            <button id="cfg-save">Save</button>
+        </div>
+    </div>
+    <script src="js/config.js"></script>
+</body>
+</html>

@@ -71,6 +71,17 @@ ws.onmessage = function(event) {
         return;
     }
 
+    // Job lifecycle events from server (job_event)
+    if (parsed && parsed.type === 'job_event') {
+        const fname = parsed.filename || '(unknown)';
+        const ev = parsed.event || '(?)';
+        // Update global job UI elements if present
+        const jf = document.getElementById('job-filename'); if (jf) jf.innerText = fname;
+        const js = document.getElementById('job-state'); if (js) js.innerText = ev;
+        appendLog(`JobEvent: ${ev} ${fname}`);
+        return;
+    }
+
     if (parsed && parsed.x !== undefined) {
         // JSON status message
         document.getElementById('pos-x').innerText = Number(parsed.x).toFixed(2);
@@ -91,6 +102,18 @@ ws.onmessage = function(event) {
         const ownerEl = document.getElementById('exec-owner');
         if (busyEl) busyEl.innerText = parsed.executor_busy ? 'busy' : 'idle';
         if (ownerEl) ownerEl.innerText = `(owner ${parsed.executor_owner_type}:${parsed.executor_owner_id})`;
+
+        // Motor outputs diagnostics (if provided)
+        if (parsed.motorOutX !== undefined) document.getElementById('mot-x').innerText = parsed.motorOutX;
+        if (parsed.motorOutY !== undefined) document.getElementById('mot-y').innerText = parsed.motorOutY;
+        if (parsed.motorOutZ !== undefined) document.getElementById('mot-z').innerText = parsed.motorOutZ;
+        if (parsed.motorOutE !== undefined) document.getElementById('mot-e').innerText = parsed.motorOutE;
+
+        // Raw encoder counts (debug)
+        if (parsed.encCountsX !== undefined) document.getElementById('enc-x').innerText = parsed.encCountsX;
+        if (parsed.encCountsY !== undefined) document.getElementById('enc-y').innerText = parsed.encCountsY;
+        if (parsed.encCountsZ !== undefined) document.getElementById('enc-z').innerText = parsed.encCountsZ;
+        if (parsed.encCountsE !== undefined) document.getElementById('enc-e').innerText = parsed.encCountsE;
 
         // Update halt reason if provided
         if (parsed.error) {
@@ -222,7 +245,57 @@ function saveConfig() {
 }
 
 // Load config on startup
-window.addEventListener('load', function() { loadConfig(); });
+// Run / Spindle / Laser controls
+function setRunAction(action) {
+    fetch(`/api/run/${action}`, { method: 'POST' }).then(r => r.json()).then(j => {
+        appendLog(`Run ${action}`);
+    }).catch(e => { appendLog('Run action failed'); console.error(e); });
+}
+
+function setRunSpeed(percent) {
+    const body = { speedPercent: parseInt(percent) };
+    fetch('/api/run/speed', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+        .then(r => r.json()).then(j => { appendLog('Run speed set'); })
+        .catch(e => { appendLog('Set speed failed'); console.error(e); });
+}
+
+function setSpindlePower(val) {
+    const body = { power: parseInt(val) };
+    fetch('/api/spindle', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+        .then(r => r.json()).then(j => { appendLog('Spindle set'); })
+        .catch(e => { appendLog('Spindle set failed'); console.error(e); });
+}
+
+function setLaserPower(val) {
+    const body = { power: parseInt(val) };
+    fetch('/api/laser', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+        .then(r => r.json()).then(j => { appendLog('Laser set'); })
+        .catch(e => { appendLog('Laser set failed'); console.error(e); });
+}
+
+// Initialize Run/Spindle/Laser UI bindings
+window.addEventListener('load', function() {
+    // Run buttons
+    const btnPlay = document.getElementById('btn-play'); if (btnPlay) btnPlay.addEventListener('click', () => setRunAction('play'));
+    const btnPause = document.getElementById('btn-pause'); if (btnPause) btnPause.addEventListener('click', () => setRunAction('pause'));
+    const btnStop = document.getElementById('btn-stop'); if (btnStop) btnStop.addEventListener('click', () => setRunAction('stop'));
+    const speed = document.getElementById('run-speed'); const speedVal = document.getElementById('run-speed-val');
+    if (speed) { speed.addEventListener('input', (e) => { if (speedVal) speedVal.innerText = e.target.value + '%'; }); speed.addEventListener('change', (e) => setRunSpeed(e.target.value)); }
+
+    // Spindle / Laser
+    const spd = document.getElementById('spindle-power'); const spdVal = document.getElementById('spindle-val');
+    if (spd) { spd.addEventListener('input', (e) => { if (spdVal) spdVal.innerText = e.target.value; }); spd.addEventListener('change', (e) => setSpindlePower(e.target.value)); }
+    const spdOff = document.getElementById('spindle-off'); if (spdOff) spdOff.addEventListener('click', () => { if (spd) { spd.value = 0; if (spdVal) spdVal.innerText = '0'; setSpindlePower(0); } });
+
+    const lsr = document.getElementById('laser-power'); const lsrVal = document.getElementById('laser-val');
+    if (lsr) { lsr.addEventListener('input', (e) => { if (lsrVal) lsrVal.innerText = e.target.value; }); lsr.addEventListener('change', (e) => setLaserPower(e.target.value)); }
+    const lsrOff = document.getElementById('laser-off'); if (lsrOff) lsrOff.addEventListener('click', () => { if (lsr) { lsr.value = 0; if (lsrVal) lsrVal.innerText = '0'; setLaserPower(0); } });
+
+    // Fetch initial states
+    fetch('/api/spindle').then(r=>r.json()).then(j=>{ if (j && j.power !== undefined && spd) { spd.value = j.power; if (spdVal) spdVal.innerText = j.power; } }).catch(()=>{});
+    fetch('/api/laser').then(r=>r.json()).then(j=>{ if (j && j.power !== undefined && lsr) { lsr.value = j.power; if (lsrVal) lsrVal.innerText = j.power; } }).catch(()=>{});
+    fetch('/api/run').then(r=>r.json()).then(j=>{ if (j && j.speedPercent !== undefined && speed) { speed.value = j.speedPercent; if (speedVal) speedVal.innerText = j.speedPercent + '%'; } }).catch(()=>{});
+});
 
 function appendLog(msg) {
     const log = document.getElementById('msg-log');

@@ -49,7 +49,7 @@ async def main(host, port):
         await ws_owner.send("G0 X100000")
 
         # Wait for immediate ack ok:queued from owner
-        msg = await recv_until(ws_owner, lambda m: m.startswith('ok:') or m.startswith('error:'), timeout=2.0)
+        msg = await recv_until(ws_owner, lambda m: (m.startswith('{') and 'status' in m) or m.startswith('ok:') or m.startswith('error:'), timeout=2.0)
         print("Owner immediate response:", msg)
 
         # Wait until broadcast reports executor_busy true (status JSON messages are broadcast)
@@ -60,7 +60,7 @@ async def main(host, port):
         # Non-owner push while busy -> should get immediate error:busy
         print("-> Other client pushing while executor busy -> expect immediate error:busy")
         await ws_other.send("G0 X1")
-        resp = await recv_until(ws_other, lambda m: m.startswith('error:') or m.startswith('ok:'), timeout=1.0)
+        resp = await recv_until(ws_other, lambda m: (m.startswith('{') and 'status' in m) or m.startswith('error:') or m.startswith('ok:'), timeout=1.0)
         print("Other client response:", resp)
 
         # Now flood many commands from owner to fill commandQueue.
@@ -71,12 +71,16 @@ async def main(host, port):
         for i in range(64):
             await ws_owner.send(f"G0 X{i}")
             # Try to get immediate response within 50ms
-            msg = await recv_until(ws_owner, lambda m: m.startswith('ok:') or m.startswith('error:'), timeout=0.05)
+            msg = await recv_until(ws_owner, lambda m: (m.startswith('{') and 'status' in m) or m.startswith('ok:') or m.startswith('error:'), timeout=0.05)
             if msg is None:
                 # No immediate response = 'pending' behavior (background waiter will reply later)
                 pending_indices.append(i)
             else:
-                if msg.startswith('ok:'):
+                # accept JSON responses too
+                if msg.startswith('{'):
+                    parsed = json.loads(msg)
+                    if parsed.get('status') == 'ok': immediate_ok_count += 1
+                elif msg.startswith('ok:'):
                     immediate_ok_count += 1
         print(f"Immediate ok: {immediate_ok_count}, pending (no immediate reply): {len(pending_indices)}")
 
@@ -89,15 +93,26 @@ async def main(host, port):
                 msg = await asyncio.wait_for(ws_owner.recv(), timeout=5.0)
             except Exception:
                 break
-            if msg.startswith('ok:queued'):
-                final_ok += 1
-                pending_indices.pop(0)
-            elif msg.startswith('error:busy'):
-                final_busy += 1
-                pending_indices.pop(0)
+            # parse JSON responses too
+            if msg.startswith('{'):
+                parsed = json.loads(msg)
+                if parsed.get('status') == 'ok':
+                    final_ok += 1
+                    pending_indices.pop(0)
+                elif parsed.get('status') == 'error':
+                    final_busy += 1
+                    pending_indices.pop(0)
+                else:
+                    # Could be status or other messages
+                    pass
             else:
-                # Could be status or other messages
-                pass
+                if msg.startswith('ok:queued'):
+                    final_ok += 1; pending_indices.pop(0)
+                elif msg.startswith('error:busy'):
+                    final_busy += 1; pending_indices.pop(0)
+                else:
+                    # Could be status or other messages
+                    pass
         print(f"Final ack results for pending: ok={final_ok}, busy={final_busy}, leftover_pending={len(pending_indices)}")
 
         # Done
