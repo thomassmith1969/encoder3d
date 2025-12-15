@@ -870,7 +870,140 @@ function calculateVolume(geometry) {
 }
 
 // --- Slicing Functions ---
+let slicingCancelled = false;
+
 async function sliceModel() {
+    if (loadedObjects.length === 0) {
+        alert('Please load at least one model first');
+        return;
+    }
+    
+    if (!encoder3DSlicer) {
+        alert('Slicer not initialized');
+        return;
+    }
+    
+    const sliceBtn = document.getElementById('slice-btn');
+    const cancelBtn = document.getElementById('cancel-slice-btn');
+    const progressDiv = document.getElementById('slice-progress');
+    const progressBar = document.getElementById('slice-progress-bar');
+    
+    sliceBtn.disabled = true;
+    if (cancelBtn) {
+        cancelBtn.style.display = 'inline-block';
+        cancelBtn.disabled = false;
+    }
+    progressDiv.innerText = 'Initializing...';
+    if (progressBar) progressBar.style.width = '0%';
+    slicingCancelled = false;
+    
+    // Get slicer settings from UI
+    const settings = {
+        layerHeight: parseFloat(document.getElementById('slice-layer-height').value) || 0.2,
+        infillDensity: parseInt(document.getElementById('slice-infill').value) || 20,
+        printSpeed: parseInt(document.getElementById('slice-speed').value) || 60,
+        nozzleTemp: parseInt(document.getElementById('slice-temp').value) || 200,
+        bedTemp: parseInt(document.getElementById('slice-bed-temp').value) || 60,
+        wallCount: 2,
+        lineWidth: 0.4,
+        infillPattern: 'rectilinear',
+        retraction: 5,
+        travelSpeed: 150
+    };
+    
+    try {
+        // Use setTimeout to allow UI updates
+        await new Promise(resolve => setTimeout(resolve, 50));
+        
+        // Use real slicer with progress callback
+        const result = await encoder3DSlicer.slice(
+            loadedObjects,
+            settings,
+            (progress, status) => {
+                if (slicingCancelled) {
+                    throw new Error('Slicing cancelled by user');
+                }
+                progressDiv.innerText = `${status} (${Math.round(progress)}%)`;
+                if (progressBar) progressBar.style.width = `${progress}%`;
+            }
+        );
+        
+        if (slicingCancelled) {
+            throw new Error('Slicing cancelled by user');
+        }
+        
+        currentGCodeData = {
+            filename: 'encoder3d_print.gcode',
+            content: result.gcode,
+            lines: result.gcode.split('\n').length
+        };
+        
+        // Update GCode info
+        document.getElementById('gcode-filename').innerText = currentGCodeData.filename;
+        document.getElementById('gcode-lines').innerText = currentGCodeData.lines;
+        document.getElementById('gcode-time').innerText = result.stats.estimatedTime;
+        
+        // Display file size
+        const sizeKB = (result.gcode.length / 1024).toFixed(1);
+        const sizeMB = (result.gcode.length / 1024 / 1024).toFixed(2);
+        const sizeDisplay = result.gcode.length > 1024 * 1024 ? `${sizeMB} MB` : `${sizeKB} KB`;
+        document.getElementById('gcode-size').innerText = sizeDisplay;
+        
+        // Don't load full GCode into textarea - too large!
+        // Only show preview on demand
+        
+        // Enable buttons
+        document.getElementById('preview-btn').disabled = false;
+        document.getElementById('print-btn').disabled = false;
+        const downloadBtn = document.getElementById('download-btn');
+        if (downloadBtn) downloadBtn.disabled = false;
+        const saveBtn = document.getElementById('save-btn');
+        if (saveBtn) saveBtn.disabled = false;
+        const viewBtn = document.getElementById('view-gcode-btn');
+        if (viewBtn) viewBtn.disabled = false;
+        const gcodeToStlBtn = document.getElementById('gcode-to-stl-btn');
+        if (gcodeToStlBtn) gcodeToStlBtn.disabled = false;
+        
+        progressDiv.innerText = `Complete! ${result.stats.layers} layers, ${sizeDisplay}`;
+        if (progressBar) progressBar.style.width = '100%';
+        sliceBtn.disabled = false;
+        if (cancelBtn) cancelBtn.style.display = 'none';
+        
+        appendLog(`Slicing complete: ${result.stats.layers} layers, ${result.stats.filamentWeight} filament, ${result.stats.estimatedTime}`);
+        
+        // Preview GCode paths
+        if (result.layers && result.layers.length > 0) {
+            previewSlicedGCode(result.layers);
+        }
+        
+    } catch (error) {
+        if (error.message.includes('cancelled')) {
+            progressDiv.innerText = 'Cancelled by user';
+            if (progressBar) progressBar.style.width = '0%';
+            appendLog('Slicing cancelled by user');
+        } else {
+            progressDiv.innerText = 'Error: ' + error.message;
+            if (progressBar) progressBar.style.width = '0%';
+            appendLog('Slicing error: ' + error.message);
+            alert('Slicing failed: ' + error.message);
+        }
+        sliceBtn.disabled = false;
+        if (cancelBtn) cancelBtn.style.display = 'none';
+        console.error('Slicing error:', error);
+    }
+}
+
+function cancelSlicing() {
+    slicingCancelled = true;
+    const cancelBtn = document.getElementById('cancel-slice-btn');
+    if (cancelBtn) {
+        cancelBtn.disabled = true;
+        cancelBtn.innerText = 'Cancelling...';
+    }
+    appendLog('Cancelling slicing operation...');
+}
+
+async function sliceModelOld() {
     if (loadedObjects.length === 0) {
         alert('Please load at least one model first');
         return;
@@ -1093,7 +1226,8 @@ function previewSlicedGCode(layers) {
                     const positions = [];
                     
                     perimeter.points.forEach(p => {
-                        positions.push(p.x, p.y, layer.z);
+                        // Map slicer XY plane to Three.js XZ plane (Y-up coordinate system)
+                        positions.push(p.x, layer.z, p.y);
                     });
                     
                     geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
@@ -1111,7 +1245,8 @@ function previewSlicedGCode(layers) {
                     const positions = [];
                     
                     infillPath.points.forEach(p => {
-                        positions.push(p.x, p.y, layer.z);
+                        // Map slicer XY plane to Three.js XZ plane (Y-up coordinate system)
+                        positions.push(p.x, layer.z, p.y);
                     });
                     
                     geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
@@ -1180,6 +1315,8 @@ function loadGCodeFile() {
         if (saveBtn) saveBtn.disabled = false;
         const viewBtn = document.getElementById('view-gcode-btn');
         if (viewBtn) viewBtn.disabled = false;
+        const gcodeToStlBtn = document.getElementById('gcode-to-stl-btn');
+        if (gcodeToStlBtn) gcodeToStlBtn.disabled = false;
         
         appendLog('GCode loaded: ' + file.name + ' (' + sizeDisplay + ')');
     };
@@ -1260,6 +1397,7 @@ function renderGCodePreview(gcode) {
                 if (part.startsWith('E')) hasE = true;
             }
             
+            // Map GCode XYZ to Three.js XZY (GCode Z becomes Three.js Y, GCode Y becomes Three.js Z)
             const points = [
                 new THREE.Vector3(lastX, lastZ, lastY),
                 new THREE.Vector3(x, z, y)
@@ -1383,6 +1521,107 @@ function saveGCodeToDevice() {
         }
         alert('Save failed: ' + error.message);
     });
+}
+
+/**
+ * Convert GCode to STL mesh
+ */
+async function convertGCodeToSTL() {
+    if (!currentGCodeData) {
+        alert('No GCode available to convert');
+        return;
+    }
+    
+    // Warn about large files
+    const sizeInMB = currentGCodeData.content.length / 1024 / 1024;
+    if (sizeInMB > 10) {
+        if (!confirm(`This GCode file is ${sizeInMB.toFixed(1)} MB. Converting large files may take a while and could freeze the browser. Continue?`)) {
+            return;
+        }
+    }
+    
+    const btn = document.getElementById('gcode-to-stl-btn');
+    if (btn) {
+        btn.disabled = true;
+        btn.innerText = 'Converting...';
+    }
+    
+    appendLog('Converting GCode to STL...');
+    
+    try {
+        // Allow UI to update
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        // Parse GCode and generate mesh with progress updates
+        const converter = new GCodeToSTL();
+        
+        // Add progress callback
+        let lastUpdate = Date.now();
+        const progressCallback = (percent, message) => {
+            const now = Date.now();
+            if (now - lastUpdate > 500) { // Update every 500ms
+                appendLog(`Converting: ${message} (${Math.round(percent)}%)`);
+                lastUpdate = now;
+            }
+        };
+        
+        const geometry = await converter.parseAsync(currentGCodeData.content, {
+            nozzleDiameter: 0.4,
+            layerHeight: parseFloat(document.getElementById('slice-layer-height').value) || 0.2,
+            extrusionWidth: 0.4,
+            resolution: 8,
+            minExtrusionLength: 0.1,
+            maxSegments: 50000, // Limit mesh complexity
+            progressCallback: progressCallback
+        });
+        
+        if (!geometry) {
+            throw new Error('Failed to generate geometry');
+        }
+        
+        // Create mesh and add to scene
+        const material = new THREE.MeshPhongMaterial({ 
+            color: 0x2e7d32,
+            specular: 0x222222,
+            shininess: 30,
+            flatShading: false,
+            side: THREE.DoubleSide
+        });
+        const mesh = new THREE.Mesh(geometry, material);
+        
+        // Add to scene
+        const filename = currentGCodeData.filename.replace('.gcode', '.stl').replace('.g', '.stl');
+        addObjectToScene(mesh, filename, geometry);
+        
+        appendLog(`Converted to STL: ${(geometry.attributes.position.count / 3).toLocaleString()} triangles`);
+        
+        // Export STL file
+        const stlData = converter.exportSTL(geometry);
+        const blob = new Blob([stlData], { type: 'application/octet-stream' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(url);
+        
+        appendLog('STL file downloaded: ' + filename);
+        
+        if (btn) {
+            btn.disabled = false;
+            btn.innerText = 'Convert to STL';
+        }
+        
+    } catch (error) {
+        appendLog('Conversion failed: ' + error.message);
+        console.error('Conversion error:', error);
+        alert('Conversion failed: ' + error.message);
+        
+        if (btn) {
+            btn.disabled = false;
+            btn.innerText = 'Convert to STL';
+        }
+    }
 }
 
 // --- Print Functions ---

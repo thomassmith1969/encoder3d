@@ -158,7 +158,11 @@
                     <div style="margin-bottom:4px;">Bed Temp: <input type="number" id="slice-bed-temp" value="60" style="width:50px">°C</div>
                 </div>
                 <button onclick="sliceModel()" id="slice-btn" disabled>Slice to GCode</button>
+                <button onclick="cancelSlicing()" id="cancel-slice-btn" style="display:none; background:#d14;" disabled>Cancel</button>
                 <div id="slice-progress" style="margin-top:8px; font-size:0.9em; color:#4ec9b0;"></div>
+                <div style="margin-top:4px; background:#333; height:20px; border-radius:4px; overflow:hidden;">
+                    <div id="slice-progress-bar" style="height:100%; width:0%; background:linear-gradient(90deg, #4ec9b0, #569cd6); transition:width 0.3s;"></div>
+                </div>
             </div>
             
             <!-- GCode Section -->
@@ -176,6 +180,9 @@
                     <button onclick="downloadGCode()" id="download-btn" disabled>Download GCode</button>
                     <button onclick="saveGCodeToDevice()" id="save-btn" disabled>Save to Device</button>
                     <button onclick="toggleGCodePreview()" id="view-gcode-btn" disabled>View Sample</button>
+                </div>
+                <div style="margin-top:8px;">
+                    <button onclick="convertGCodeToSTL()" id="gcode-to-stl-btn" disabled>Convert to STL</button>
                 </div>
                 <div id="gcode-viewer" style="display:none; margin-top:8px;">
                     <div style="font-size:0.8em; color:#999; margin-bottom:4px;">
@@ -210,6 +217,7 @@
             </div>
         </div>
     </div>
+    <script src="js/gcode-to-stl.js"></script>
     <script src="js/app.js"></script>
 </body>
 </html>
