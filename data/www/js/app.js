@@ -504,7 +504,7 @@ function updateObjectList() {
     });
 }
 
-function addNewSTL() {
+function addNewModel() {
     const fileInput = document.getElementById('stl-upload-multi');
     if (fileInput) {
         fileInput.click();
@@ -536,7 +536,251 @@ function toggleObjectsView() {
     });
 }
 
-// --- STL Loading Functions ---
+// --- Model Loading Functions (Multi-Format Support) ---
+function loadModel() {
+    const fileInput = document.getElementById('stl-upload-multi');
+    const file = fileInput.files[0];
+    if (!file) {
+        alert('Please select a model file first');
+        return;
+    }
+
+    const extension = file.name.split('.').pop().toLowerCase();
+    appendLog('Loading ' + extension.toUpperCase() + ': ' + file.name + '...');
+    
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        try {
+            let mesh = null;
+            let geometry = null;
+            
+            switch(extension) {
+                case 'stl':
+                    mesh = loadSTLFromData(e.target.result, file.name);
+                    break;
+                case 'obj':
+                    mesh = loadOBJFromData(e.target.result, file.name);
+                    break;
+                case 'ply':
+                    mesh = loadPLYFromData(e.target.result, file.name);
+                    break;
+                case 'svg':
+                    mesh = loadSVGFromData(e.target.result, file.name);
+                    break;
+                case 'dxf':
+                    appendLog('DXF support coming soon');
+                    alert('DXF format support is under development');
+                    break;
+                case '3mf':
+                    appendLog('3MF support coming soon');
+                    alert('3MF format support is under development');
+                    break;
+                default:
+                    throw new Error('Unsupported file format: ' + extension);
+            }
+            
+            if (mesh) {
+                // Add to scene as a new object
+                geometry = mesh.geometry || mesh.children[0]?.geometry;
+                const obj = addObjectToScene(mesh, file.name, geometry);
+                selectObject(obj);
+                
+                // Update info display
+                updateModelInfo(file.name, geometry);
+                
+                // Adjust camera to view
+                adjustCameraToModel(geometry);
+                
+                appendLog('Model loaded: ' + file.name);
+            }
+            
+            // Clear file input
+            fileInput.value = '';
+        } catch (error) {
+            appendLog('ERROR loading model: ' + error.message);
+            console.error('Model Load Error:', error);
+            alert('Failed to load model: ' + error.message);
+        }
+    };
+    
+    reader.onerror = function() {
+        appendLog('ERROR: Failed to read file');
+        alert('Failed to read file');
+    };
+    
+    // Read file based on format
+    if (extension === 'svg' || extension === 'dxf') {
+        reader.readAsText(file);
+    } else {
+        reader.readAsArrayBuffer(file);
+    }
+}
+
+function loadSTLFromData(data, filename) {
+    const loader = new THREE.STLLoader();
+    const geometry = loader.parse(data);
+    
+    geometry.computeVertexNormals();
+    geometry.computeBoundingBox();
+    
+    const material = new THREE.MeshPhongMaterial({ 
+        color: 0x4a90e2, 
+        specular: 0x222222, 
+        shininess: 30,
+        flatShading: false,
+        side: THREE.DoubleSide
+    });
+    const mesh = new THREE.Mesh(geometry, material);
+    
+    // Center model
+    const bbox = geometry.boundingBox;
+    const center = new THREE.Vector3();
+    bbox.getCenter(center);
+    geometry.translate(-center.x, -center.y, -bbox.min.z);
+    
+    return mesh;
+}
+
+function loadOBJFromData(data, filename) {
+    const loader = new THREE.OBJLoader();
+    const text = new TextDecoder().decode(data);
+    const object = loader.parse(text);
+    
+    // Apply material to all meshes
+    object.traverse(function(child) {
+        if (child instanceof THREE.Mesh) {
+            child.material = new THREE.MeshPhongMaterial({ 
+                color: 0x4a90e2,
+                specular: 0x222222,
+                shininess: 30
+            });
+            
+            if (!child.geometry.attributes.normal) {
+                child.geometry.computeVertexNormals();
+            }
+            child.geometry.computeBoundingBox();
+        }
+    });
+    
+    // Center the object
+    const box = new THREE.Box3().setFromObject(object);
+    const center = new THREE.Vector3();
+    box.getCenter(center);
+    object.position.sub(center);
+    object.position.z -= box.min.z;
+    
+    return object.children[0] || object;
+}
+
+function loadPLYFromData(data, filename) {
+    const loader = new THREE.PLYLoader();
+    const geometry = loader.parse(data);
+    
+    if (!geometry.attributes.normal) {
+        geometry.computeVertexNormals();
+    }
+    geometry.computeBoundingBox();
+    
+    // Check if has vertex colors
+    const hasColors = geometry.attributes.color !== undefined;
+    
+    const material = new THREE.MeshPhongMaterial({ 
+        color: hasColors ? 0xffffff : 0x4a90e2,
+        specular: 0x222222,
+        shininess: 30,
+        vertexColors: hasColors
+    });
+    
+    const mesh = new THREE.Mesh(geometry, material);
+    
+    // Center model
+    const bbox = geometry.boundingBox;
+    const center = new THREE.Vector3();
+    bbox.getCenter(center);
+    geometry.translate(-center.x, -center.y, -bbox.min.z);
+    
+    return mesh;
+}
+
+function loadSVGFromData(text, filename) {
+    const loader = new THREE.SVGLoader();
+    const data = loader.parse(text);
+    
+    if (data.paths.length === 0) {
+        throw new Error('No paths found in SVG');
+    }
+    
+    const group = new THREE.Group();
+    const extrudeDepth = 1; // Default extrusion for 2D shapes
+    
+    // Create shapes and extrude them
+    const shapes = loader.createShapes(data, extrudeDepth);
+    
+    shapes.forEach(shapeData => {
+        const geometry = new THREE.ExtrudeGeometry(shapeData.shape, {
+            depth: extrudeDepth,
+            bevelEnabled: false
+        });
+        
+        const color = shapeData.color || '#4a90e2';
+        const material = new THREE.MeshPhongMaterial({ 
+            color: new THREE.Color(color),
+            side: THREE.DoubleSide
+        });
+        
+        const mesh = new THREE.Mesh(geometry, material);
+        group.add(mesh);
+    });
+    
+    // Center the group
+    const box = new THREE.Box3().setFromObject(group);
+    const center = new THREE.Vector3();
+    box.getCenter(center);
+    group.position.sub(center);
+    group.position.z -= box.min.z;
+    
+    // Rotate to lie flat (SVG is in XY plane, we want it on build plate)
+    group.rotation.x = -Math.PI / 2;
+    
+    return group.children[0] || group;
+}
+
+function updateModelInfo(filename, geometry) {
+    if (!geometry) return;
+    
+    const infoDiv = document.getElementById('stl-info');
+    if (!infoDiv) return;
+    
+    geometry.computeBoundingBox();
+    const bbox = geometry.boundingBox;
+    const size = new THREE.Vector3();
+    bbox.getSize(size);
+    
+    const triangles = geometry.index ? geometry.index.count / 3 : geometry.attributes.position.count / 3;
+    const volume = calculateVolume(geometry);
+    
+    infoDiv.innerHTML = 
+        `<strong>${filename}</strong><br>` +
+        `Size: ${size.x.toFixed(1)} × ${size.y.toFixed(1)} × ${size.z.toFixed(1)} mm<br>` +
+        `Triangles: ${triangles.toLocaleString()}<br>` +
+        `Volume: ${volume.toFixed(2)} cm³`;
+}
+
+function adjustCameraToModel(geometry) {
+    if (!geometry) return;
+    
+    geometry.computeBoundingBox();
+    const bbox = geometry.boundingBox;
+    const size = new THREE.Vector3();
+    bbox.getSize(size);
+    
+    const maxDim = Math.max(size.x, size.y, size.z);
+    camera.position.set(maxDim * 1.5, maxDim * 1.5, maxDim * 1.5);
+    camera.lookAt(0, size.z / 2, 0);
+    if (controls) controls.target.set(0, size.z / 2, 0);
+}
+
+// Legacy function for old file input (deprecated)
 function loadSTL() {
     const fileInput = document.getElementById('stl-upload');
     const file = fileInput.files[0];
