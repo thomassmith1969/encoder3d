@@ -106,6 +106,8 @@ class Encoder3DSlicer {
         // Merge layers from all objects by Z height
         const mergedLayers = this.mergeLayers(allLayers, maxLayerCount);
         
+        console.log(`After merge: ${mergedLayers.length} total merged layers`);
+        
         if (progressCallback) progressCallback(40, 'Generating toolpaths...');
         
         // Generate paths for each layer
@@ -140,8 +142,12 @@ class Encoder3DSlicer {
         if (progressCallback) progressCallback(85, 'Generating GCode...');
         await new Promise(resolve => setTimeout(resolve, 10));
         
+        console.log(`Generating GCode for ${mergedLayers.length} layers...`);
+        
         // Generate GCode
         const gcode = this.gcodeGen.generate(mergedLayers, settings);
+        
+        console.log(`GCode generation complete. Length: ${gcode.length} chars`);
         
         if (progressCallback) progressCallback(95, 'Calculating statistics...');
         await new Promise(resolve => setTimeout(resolve, 10));

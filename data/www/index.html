@@ -48,6 +48,9 @@
                         <label>Scale: <input type="number" id="obj-scale" step="10" value="100" onchange="applyTransform()">%</label>
                         <button onclick="resetTransform()" style="padding: 4px 8px;">Reset</button>
                     </div>
+                    <div style="font-size: 0.85em; color: #999; margin-top: 4px;">
+                        Size: <span id="obj-actual-size">--</span>
+                    </div>
                 </div>
             </div>
         </div>
@@ -152,6 +155,7 @@
                 <h3>Slicer Settings</h3>
                 <div style="font-size:0.9em;">
                     <div style="margin-bottom:4px;">Layer Height: <input type="number" id="slice-layer-height" value="0.2" step="0.05" style="width:60px"> mm</div>
+                    <div style="margin-bottom:4px;">Max Z Height: <input type="number" id="slice-max-z" value="200" step="10" style="width:60px"> mm</div>
                     <div style="margin-bottom:4px;">Infill: <input type="number" id="slice-infill" value="20" min="0" max="100" style="width:50px">%</div>
                     <div style="margin-bottom:4px;">Print Speed: <input type="number" id="slice-speed" value="60" style="width:50px"> mm/s</div>
                     <div style="margin-bottom:4px;">Nozzle Temp: <input type="number" id="slice-temp" value="200" style="width:50px">°C</div>

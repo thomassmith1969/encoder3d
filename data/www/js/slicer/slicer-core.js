@@ -32,20 +32,35 @@ class SlicerCore {
         const bbox = geometry.boundingBox;
         
         // Apply transform to get actual build space bounds
-        const minZ = bbox.min.z + (transform.position.z || 0);
-        const maxZ = bbox.max.z + (transform.position.z || 0);
+        let minZ = bbox.min.z + (transform.position.z || 0);
+        let maxZ = bbox.max.z + (transform.position.z || 0);
+        
+        console.log(`Object bounds BEFORE limit: minZ=${minZ.toFixed(2)}, maxZ=${maxZ.toFixed(2)}`);
+        console.log(`Settings maxZHeight: ${settings.maxZHeight}`);
+        
+        // Apply max Z height limit if specified (absolute height from build plate)
+        // ALWAYS use the user's setting if provided - don't only limit when object is taller
+        if (settings.maxZHeight !== undefined && settings.maxZHeight > 0) {
+            console.log(`FORCING: maxZ to user setting ${settings.maxZHeight}`);
+            maxZ = settings.maxZHeight;
+            
+            // Also ensure we don't start above the limit
+            if (minZ > settings.maxZHeight) {
+                console.warn(`Object starts above max Z height limit!`);
+                return [];
+            }
+        }
         
         const layerHeight = settings.layerHeight || 0.2;
-        // Add 1 to ensure we slice all the way through the top
-        const numLayers = Math.ceil((maxZ - minZ) / layerHeight) + 1;
+        const numLayers = Math.ceil((maxZ - minZ) / layerHeight);
 
-        console.log(`Slicing: ${numLayers} layers from Z=${minZ.toFixed(2)} to Z=${maxZ.toFixed(2)}`);
+        console.log(`FINAL: Slicing ${numLayers} layers from Z=${minZ.toFixed(2)} to Z=${maxZ.toFixed(2)}, layer height=${layerHeight}mm`);
 
         // Slice each layer
         for (let i = 0; i < numLayers; i++) {
             const z = minZ + (i * layerHeight);
             // Only slice if within bounds
-            if (z <= maxZ + layerHeight * 0.1) {
+            if (z <= maxZ) {
                 const layer = this.sliceLayer(geometry, z, transform, i);
                 if (layer && layer.segments.length > 0) {
                     this.layers.push(layer);

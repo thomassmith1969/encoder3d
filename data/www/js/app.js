@@ -376,11 +376,21 @@ window.addEventListener('resize', () => {
 
 // --- Object Management Functions ---
 function addObjectToScene(mesh, filename, geometry) {
+    // Calculate original bounding box dimensions
+    geometry.computeBoundingBox();
+    const bbox = geometry.boundingBox;
+    const originalSize = {
+        x: bbox.max.x - bbox.min.x,
+        y: bbox.max.y - bbox.min.y,
+        z: bbox.max.z - bbox.min.z
+    };
+    
     const obj = {
         id: objectIdCounter++,
         mesh: mesh,
         geometry: geometry,
         filename: filename,
+        originalSize: originalSize,
         transform: {
             position: { x: 0, y: 0, z: 0 },
             rotation: { x: 0, y: 0, z: 0 },
@@ -427,6 +437,7 @@ function selectObject(obj) {
     document.getElementById('obj-rot-y').value = Math.round(obj.transform.rotation.y * 180 / Math.PI);
     document.getElementById('obj-rot-z').value = Math.round(obj.transform.rotation.z * 180 / Math.PI);
     document.getElementById('obj-scale').value = obj.transform.scale * 100;
+    updateSizeDisplay();
 }
 
 function applyTransform() {
@@ -449,6 +460,24 @@ function applyTransform() {
     selectedObject.mesh.position.set(posX, posZ, posY);
     selectedObject.mesh.rotation.set(rotX, rotY, rotZ);
     selectedObject.mesh.scale.set(scale, scale, scale);
+    
+    // Update size display
+    updateSizeDisplay();
+}
+
+function updateSizeDisplay() {
+    if (!selectedObject || !selectedObject.originalSize) return;
+    const scale = selectedObject.transform.scale;
+    const size = selectedObject.originalSize;
+    const actualSize = {
+        x: (size.x * scale).toFixed(2),
+        y: (size.y * scale).toFixed(2),
+        z: (size.z * scale).toFixed(2)
+    };
+    const sizeDisplay = document.getElementById('obj-actual-size');
+    if (sizeDisplay) {
+        sizeDisplay.innerText = `${actualSize.x} × ${actualSize.y} × ${actualSize.z} mm`;
+    }
 }
 
 function resetTransform() {
@@ -956,6 +985,7 @@ async function sliceModel() {
     // Get slicer settings from UI
     const settings = {
         layerHeight: parseFloat(document.getElementById('slice-layer-height').value) || 0.2,
+        maxZHeight: parseFloat(document.getElementById('slice-max-z').value) || 200,
         infillDensity: parseInt(document.getElementById('slice-infill').value) || 20,
         printSpeed: parseInt(document.getElementById('slice-speed').value) || 60,
         nozzleTemp: parseInt(document.getElementById('slice-temp').value) || 200,
@@ -1283,7 +1313,8 @@ function previewSlicedGCode(layers) {
                     
                     perimeter.points.forEach(p => {
                         // Map slicer XY plane to Three.js XZ plane (Y-up coordinate system)
-                        positions.push(p.x, layer.z, p.y);
+                        // Rotate 180 degrees around Y axis (negate X and Z)
+                        positions.push(-p.x, layer.z, -p.y);
                     });
                     
                     geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
@@ -1302,7 +1333,8 @@ function previewSlicedGCode(layers) {
                     
                     infillPath.points.forEach(p => {
                         // Map slicer XY plane to Three.js XZ plane (Y-up coordinate system)
-                        positions.push(p.x, layer.z, p.y);
+                        // Rotate 180 degrees around Y axis (negate X and Z)
+                        positions.push(-p.x, layer.z, -p.y);
                     });
                     
                     geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));

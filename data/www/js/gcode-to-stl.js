@@ -17,13 +17,18 @@ class GCodeToSTL {
      * @returns {Promise<THREE.BufferGeometry>} Generated mesh
      */
     async parseAsync(gcode, settings = {}) {
+        // Reset arrays for new conversion
+        this.triangles = [];
+        this.vertices = [];
+        this.normals = [];
+        
         const s = {
             nozzleDiameter: settings.nozzleDiameter || 0.4,
             layerHeight: settings.layerHeight || 0.2,
             extrusionWidth: settings.extrusionWidth || 0.4,
             resolution: settings.resolution || 8,
             minExtrusionLength: settings.minExtrusionLength || 0.1,
-            maxSegments: settings.maxSegments || 50000 // Limit complexity
+            maxSegments: settings.maxSegments || Infinity // No limit by default
         };
 
         const progressCallback = settings.progressCallback || (() => {});
@@ -38,14 +43,15 @@ class GCodeToSTL {
         let layerPaths = [];
         let currentPath = [];
         let segmentCount = 0;
+        let skippedSegments = 0;
 
         // Parse GCode and extract extrusion paths
         for (let i = 0; i < lines.length; i++) {
             if (i % 1000 === 0) {
                 progressCallback((i / lines.length) * 50, 'Parsing GCode');
-                // Yield to browser every 1000 lines
-                if (i % 5000 === 0) {
-                    await new Promise(resolve => setTimeout(resolve, 0));
+                // Yield to browser every 5000 lines
+                if (i % 5000 === 0 && i > 0) {
+                    await new Promise(resolve => setTimeout(resolve, 1));
                 }
             }
 
@@ -82,6 +88,8 @@ class GCodeToSTL {
                                 distance: distance
                             });
                             segmentCount++;
+                        } else {
+                            skippedSegments++;
                         }
                     }
                 } else if (hasMove && currentPath.length > 0) {
@@ -107,10 +115,17 @@ class GCodeToSTL {
             layerPaths.push(currentPath);
         }
 
-        console.log(`Found ${layerPaths.length} extrusion paths with ${segmentCount} segments`);
+        console.log(`GCode Parsing Complete:`);
+        console.log(`  - Total paths: ${layerPaths.length}`);
+        console.log(`  - Total segments: ${segmentCount}`);
+        console.log(`  - Skipped segments: ${skippedSegments}`);
         
-        if (segmentCount >= s.maxSegments) {
-            console.warn(`Segment count limited to ${s.maxSegments} for performance`);
+        if (skippedSegments > 0) {
+            const msg = `Warning: Skipped ${skippedSegments} segments due to complexity limit`;
+            console.warn(msg);
+            if (typeof appendLog !== 'undefined') {
+                appendLog(msg);
+            }
         }
 
         progressCallback(55, 'Generating mesh');
@@ -118,17 +133,19 @@ class GCodeToSTL {
         // Generate mesh from paths
         for (let pathIndex = 0; pathIndex < layerPaths.length; pathIndex++) {
             if (pathIndex % 100 === 0) {
-                progressCallback(55 + (pathIndex / layerPaths.length) * 40, 'Generating mesh');
-                // Yield every 100 paths
-                if (pathIndex % 500 === 0) {
-                    await new Promise(resolve => setTimeout(resolve, 0));
+                progressCallback(55 + (pathIndex / layerPaths.length) * 40, `Generating mesh ${pathIndex}/${layerPaths.length}`);
+                // Yield every 500 paths
+                if (pathIndex % 500 === 0 && pathIndex > 0) {
+                    await new Promise(resolve => setTimeout(resolve, 1));
                 }
             }
             this.generatePathMesh(layerPaths[pathIndex], s);
         }
 
+        console.log(`Generated ${this.triangles.length} triangles from ${layerPaths.length} paths`);
+        
         progressCallback(95, 'Creating geometry');
-        await new Promise(resolve => setTimeout(resolve, 0));
+        await new Promise(resolve => setTimeout(resolve, 1));
 
         // Create Three.js geometry
         const geometry = new THREE.BufferGeometry();
@@ -176,6 +193,11 @@ class GCodeToSTL {
      * @returns {THREE.BufferGeometry} Generated mesh
      */
     parse(gcode, settings = {}) {
+        // Reset arrays for new conversion
+        this.triangles = [];
+        this.vertices = [];
+        this.normals = [];
+        
         const s = {
             nozzleDiameter: settings.nozzleDiameter || 0.4,
             layerHeight: settings.layerHeight || 0.2,
@@ -312,23 +334,34 @@ class GCodeToSTL {
     generatePathMesh(path, settings) {
         const width = settings.extrusionWidth;
         const height = settings.layerHeight;
-        const res = settings.resolution;
 
         path.forEach((segment, segIndex) => {
+            // Convert GCode coordinates (Z-up) to Three.js coordinates (Y-up)
+            // GCode: X=X, Y=Y, Z=height
+            // Three.js: X=X, Y=height, Z=Y
+            const seg = {
+                x1: segment.x1,
+                y1: segment.z1,  // GCode Z becomes Three.js Y (height)
+                z1: segment.y1,  // GCode Y becomes Three.js Z (depth)
+                x2: segment.x2,
+                y2: segment.z2,  // GCode Z becomes Three.js Y (height)
+                z2: segment.y2   // GCode Y becomes Three.js Z (depth)
+            };
+
             // Create rectangular cross-section for the extrusion
-            const dx = segment.x2 - segment.x1;
-            const dy = segment.y2 - segment.y1;
-            const length = Math.sqrt(dx * dx + dy * dy);
+            const dx = seg.x2 - seg.x1;
+            const dz = seg.z2 - seg.z1;  // Using Z now (was Y in GCode)
+            const length = Math.sqrt(dx * dx + dz * dz);
             
             if (length < 0.001) return;
 
-            // Direction vector
+            // Direction vector in XZ plane
             const dirX = dx / length;
-            const dirY = dy / length;
+            const dirZ = dz / length;
 
-            // Perpendicular vector (for width)
-            const perpX = -dirY;
-            const perpY = dirX;
+            // Perpendicular vector (for width) in XZ plane
+            const perpX = -dirZ;
+            const perpZ = dirX;
 
             // Half width
             const hw = width / 2;
@@ -336,36 +369,36 @@ class GCodeToSTL {
             // Four corners of the extrusion segment
             const corners = [
                 { // Bottom-left
-                    x1: segment.x1 + perpX * hw,
-                    y1: segment.y1 + perpY * hw,
-                    z1: segment.z1,
-                    x2: segment.x2 + perpX * hw,
-                    y2: segment.y2 + perpY * hw,
-                    z2: segment.z2
+                    x1: seg.x1 + perpX * hw,
+                    y1: seg.y1,
+                    z1: seg.z1 + perpZ * hw,
+                    x2: seg.x2 + perpX * hw,
+                    y2: seg.y2,
+                    z2: seg.z2 + perpZ * hw
                 },
                 { // Bottom-right
-                    x1: segment.x1 - perpX * hw,
-                    y1: segment.y1 - perpY * hw,
-                    z1: segment.z1,
-                    x2: segment.x2 - perpX * hw,
-                    y2: segment.y2 - perpY * hw,
-                    z2: segment.z2
+                    x1: seg.x1 - perpX * hw,
+                    y1: seg.y1,
+                    z1: seg.z1 - perpZ * hw,
+                    x2: seg.x2 - perpX * hw,
+                    y2: seg.y2,
+                    z2: seg.z2 - perpZ * hw
                 },
                 { // Top-right
-                    x1: segment.x1 - perpX * hw,
-                    y1: segment.y1 - perpY * hw,
-                    z1: segment.z1 + height,
-                    x2: segment.x2 - perpX * hw,
-                    y2: segment.y2 - perpY * hw,
-                    z2: segment.z2 + height
+                    x1: seg.x1 - perpX * hw,
+                    y1: seg.y1 + height,
+                    z1: seg.z1 - perpZ * hw,
+                    x2: seg.x2 - perpX * hw,
+                    y2: seg.y2 + height,
+                    z2: seg.z2 - perpZ * hw
                 },
                 { // Top-left
-                    x1: segment.x1 + perpX * hw,
-                    y1: segment.y1 + perpY * hw,
-                    z1: segment.z1 + height,
-                    x2: segment.x2 + perpX * hw,
-                    y2: segment.y2 + perpY * hw,
-                    z2: segment.z2 + height
+                    x1: seg.x1 + perpX * hw,
+                    y1: seg.y1 + height,
+                    z1: seg.z1 + perpZ * hw,
+                    x2: seg.x2 + perpX * hw,
+                    y2: seg.y2 + height,
+                    z2: seg.z2 + perpZ * hw
                 }
             ];
 
