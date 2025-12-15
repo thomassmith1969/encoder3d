@@ -1534,8 +1534,8 @@ async function convertGCodeToSTL() {
     
     // Warn about large files
     const sizeInMB = currentGCodeData.content.length / 1024 / 1024;
-    if (sizeInMB > 10) {
-        if (!confirm(`This GCode file is ${sizeInMB.toFixed(1)} MB. Converting large files may take a while and could freeze the browser. Continue?`)) {
+    if (sizeInMB > 20) {
+        if (!confirm(`This GCode file is ${sizeInMB.toFixed(1)} MB. Converting will take time but won't freeze. Continue?`)) {
             return;
         }
     }
@@ -1546,32 +1546,20 @@ async function convertGCodeToSTL() {
         btn.innerText = 'Converting...';
     }
     
-    appendLog('Converting GCode to STL...');
+    appendLog('Converting GCode to STL with BIG async chunks...');
     
     try {
-        // Allow UI to update
-        await new Promise(resolve => setTimeout(resolve, 100));
-        
-        // Parse GCode and generate mesh with progress updates
         const converter = new GCodeToSTL();
         
-        // Add progress callback
-        let lastUpdate = Date.now();
         const progressCallback = (percent, message) => {
-            const now = Date.now();
-            if (now - lastUpdate > 500) { // Update every 500ms
-                appendLog(`Converting: ${message} (${Math.round(percent)}%)`);
-                lastUpdate = now;
-            }
+            if (btn) btn.innerText = `Converting... ${Math.round(percent)}%`;
         };
         
-        const geometry = await converter.parseAsync(currentGCodeData.content, {
+        const geometry = await converter.parse(currentGCodeData.content, {
             nozzleDiameter: 0.4,
             layerHeight: parseFloat(document.getElementById('slice-layer-height').value) || 0.2,
             extrusionWidth: 0.4,
-            resolution: 8,
             minExtrusionLength: 0.1,
-            maxSegments: 50000, // Limit mesh complexity
             progressCallback: progressCallback
         });
         
