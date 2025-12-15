@@ -1,5 +1,25 @@
 # Encoder3D Controller Design Specification
 
+## Overview
+**Universal CNC Control Platform** with encoder-feedback PID motor control supporting multiple fabrication methods:
+- **3D Printing** - FDM with precision temperature control
+- **CNC Milling** - Future: Spindle control and toolpath execution
+- **Laser Cutting/Engraving** - Future: Laser power modulation and 2D/3D paths
+
+## Supported File Formats
+### Current Implementation
+- **STL** - Standard Tessellation Language (3D printing/milling)
+- **OBJ** - Wavefront Object (3D models with materials)
+- **PLY** - Polygon File Format (3D scans with vertex colors)
+- **SVG** - Scalable Vector Graphics (laser cutting/engraving paths)
+
+### Planned Support
+- **3MF** - 3D Manufacturing Format (modern 3D printing, multi-material)
+- **DXF** - AutoCAD Drawing Exchange Format (2D CAD for laser/milling)
+- **STEP/IGES** - CAD formats (may require server-side conversion)
+
+---
+
 ## 1. Hardware Architecture
 **Target Platform**: ESP32 Lolin32 Lite
 **Kinematics**: 4-Axis (X, Y, Z, E)
