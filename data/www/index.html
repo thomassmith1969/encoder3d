@@ -94,28 +94,34 @@
             </div>
             
             <!-- Object List & Manipulation -->
-            <div id="object-panel">
-                <div class="panel-header">
-                    <strong>Loaded Objects</strong>
-                    <button onclick="addNewSTL()" style="padding: 2px 8px; font-size: 0.85em;">+ Add STL</button>
+            <div id="object-panel" class="collapsed">
+                <div class="panel-header" onclick="toggleObjectPanel()" style="cursor: pointer;">
+                    <strong>Objects (<span id="object-count">0</span>)</strong>
+                    <span id="panel-toggle-icon">▼</span>
                 </div>
-                <div id="object-list"></div>
-                <div id="object-transform" style="display: none;">
-                    <hr style="border-color: #444; margin: 10px 0;">
-                    <div style="margin-bottom: 8px;"><strong>Transform: <span id="selected-obj-name"></span></strong></div>
-                    <div class="transform-row">
-                        <label>X: <input type="number" id="obj-pos-x" step="1" value="0" onchange="applyTransform()"></label>
-                        <label>Y: <input type="number" id="obj-pos-y" step="1" value="0" onchange="applyTransform()"></label>
-                        <label>Z: <input type="number" id="obj-pos-z" step="1" value="0" onchange="applyTransform()"></label>
+                <div id="object-panel-content">
+                    <div style="margin: 10px 0;">
+                        <input type="file" id="stl-upload-multi" accept=".stl" onchange="loadSTL()" style="display: none;">
+                        <button onclick="addNewSTL()" style="width: 100%; padding: 6px;">+ Add STL</button>
                     </div>
-                    <div class="transform-row">
-                        <label>Rot X: <input type="number" id="obj-rot-x" step="15" value="0" onchange="applyTransform()"></label>
-                        <label>Rot Y: <input type="number" id="obj-rot-y" step="15" value="0" onchange="applyTransform()"></label>
-                        <label>Rot Z: <input type="number" id="obj-rot-z" step="15" value="0" onchange="applyTransform()"></label>
-                    </div>
-                    <div class="transform-row">
-                        <label>Scale: <input type="number" id="obj-scale" step="10" value="100" onchange="applyTransform()">%</label>
-                        <button onclick="resetTransform()" style="padding: 4px 8px;">Reset</button>
+                    <div id="object-list"></div>
+                    <div id="object-transform" style="display: none;">
+                        <hr style="border-color: #444; margin: 10px 0;">
+                        <div style="margin-bottom: 8px;"><strong>Transform: <span id="selected-obj-name"></span></strong></div>
+                        <div class="transform-row">
+                            <label>X: <input type="number" id="obj-pos-x" step="1" value="0" onchange="applyTransform()"></label>
+                            <label>Y: <input type="number" id="obj-pos-y" step="1" value="0" onchange="applyTransform()"></label>
+                            <label>Z: <input type="number" id="obj-pos-z" step="1" value="0" onchange="applyTransform()"></label>
+                        </div>
+                        <div class="transform-row">
+                            <label>Rot X: <input type="number" id="obj-rot-x" step="15" value="0" onchange="applyTransform()"></label>
+                            <label>Rot Y: <input type="number" id="obj-rot-y" step="15" value="0" onchange="applyTransform()"></label>
+                            <label>Rot Z: <input type="number" id="obj-rot-z" step="15" value="0" onchange="applyTransform()"></label>
+                        </div>
+                        <div class="transform-row">
+                            <label>Scale: <input type="number" id="obj-scale" step="10" value="100" onchange="applyTransform()">%</label>
+                            <button onclick="resetTransform()" style="padding: 4px 8px;">Reset</button>
+                        </div>
                     </div>
                 </div>
             </div>

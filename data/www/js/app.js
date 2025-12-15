@@ -465,7 +465,11 @@ function resetTransform() {
 
 function updateObjectList() {
     const listDiv = document.getElementById('object-list');
+    const countSpan = document.getElementById('object-count');
     if (!listDiv) return;
+    
+    // Update count
+    if (countSpan) countSpan.innerText = loadedObjects.length;
     
     listDiv.innerHTML = '';
     
@@ -501,7 +505,17 @@ function updateObjectList() {
 }
 
 function addNewSTL() {
-    document.getElementById('stl-upload').click();
+    const fileInput = document.getElementById('stl-upload-multi');
+    if (fileInput) {
+        fileInput.click();
+    }
+}
+
+function toggleObjectPanel() {
+    const panel = document.getElementById('object-panel');
+    if (panel) {
+        panel.classList.toggle('collapsed');
+    }
 }
 
 // View toggle functions
