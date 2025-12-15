@@ -11,6 +11,7 @@
     <script src="js/OBJLoader.js"></script>
     <script src="js/PLYLoader.js"></script>
     <script src="js/SVGLoader.js"></script>
+    <script src="js/model-exporter.js"></script>
     <!-- Slicer modules -->
     <script src="js/slicer/slicer-core.js"></script>
     <script src="js/slicer/slicer-paths.js"></script>
@@ -135,6 +136,7 @@
                 <label><input type="checkbox" id="show-toolhead" checked onchange="toggleToolheadView()"> Toolhead</label>
                 <label><input type="checkbox" id="show-gcode-view" checked onchange="toggleGCodeView()"> GCode</label>
                 <label><input type="checkbox" id="show-objects" checked onchange="toggleObjectsView()"> Objects</label>
+                <button onclick="resetCamera()" style="margin-left: 15px; padding: 4px 12px;">Reset View</button>
             </div>
             
             <!-- Three.js Canvas will be injected here -->
@@ -169,6 +171,26 @@
                 </div>
             </div>
             
+            <!-- Export Section -->
+            <div class="panel">
+                <h3>Export Model</h3>
+                <div style="margin-bottom:8px;">
+                    <label><input type="checkbox" id="export-scene-checkbox"> Export Entire Scene</label>
+                </div>
+                <div style="display:flex; gap:4px; align-items:center;">
+                    <select id="export-format" style="flex:1;">
+                        <option value="stl">STL</option>
+                        <option value="obj">OBJ</option>
+                        <option value="ply">PLY</option>
+                    </select>
+                    <button onclick="exportModel()" id="export-btn">Export</button>
+                </div>
+                <div id="export-progress" style="margin-top:8px; font-size:0.9em; color:#4ec9b0;"></div>
+                <div style="margin-top:4px; background:#333; height:20px; border-radius:4px; overflow:hidden;">
+                    <div id="export-progress-bar" style="height:100%; width:0%; background:linear-gradient(90deg, #4ec9b0, #569cd6); transition:width 0.3s;"></div>
+                </div>
+            </div>
+            
             <!-- GCode Section -->
             <div class="panel">
                 <h3>GCode File</h3>
@@ -186,7 +208,7 @@
                     <button onclick="toggleGCodePreview()" id="view-gcode-btn" disabled>View Sample</button>
                 </div>
                 <div style="margin-top:8px;">
-                    <button onclick="convertGCodeToSTL()" id="gcode-to-stl-btn" disabled>Convert to STL</button>
+                    <button onclick="convertGCodeToModel()" id="gcode-to-model-btn" disabled>Convert to Model</button>
                 </div>
                 <div id="gcode-viewer" style="display:none; margin-top:8px;">
                     <div style="font-size:0.8em; color:#999; margin-bottom:4px;">

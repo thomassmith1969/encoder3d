@@ -621,6 +621,18 @@ function toggleObjectsView() {
     });
 }
 
+function resetCamera() {
+    if (!camera || !controls) return;
+    
+    // Reset camera position
+    camera.position.set(100, 100, 100);
+    camera.lookAt(0, 0, 0);
+    
+    // Reset controls target
+    controls.target.set(0, 0, 0);
+    controls.update();
+}
+
 // --- Model Loading Functions (Multi-Format Support) ---
 function loadModel() {
     const fileInput = document.getElementById('stl-upload-multi');
@@ -644,6 +656,7 @@ function loadModel() {
                     mesh = loadSTLFromData(e.target.result, file.name);
                     break;
                 case 'obj':
+                    console.log('Loading OBJ file, data type:', typeof e.target.result, 'first 100 chars:', e.target.result?.substring(0, 100));
                     mesh = loadOBJFromData(e.target.result, file.name);
                     break;
                 case 'ply':
@@ -666,8 +679,83 @@ function loadModel() {
             
             if (mesh) {
                 // Add to scene as a new object
-                geometry = mesh.geometry || mesh.children[0]?.geometry;
-                const obj = addObjectToScene(mesh, file.name, geometry);
+                let geometry;
+                let finalMesh;
+                
+                // Handle both direct mesh and objects with children
+                if (mesh.geometry) {
+                    geometry = mesh.geometry;
+                    finalMesh = mesh;
+                } else if (mesh.children && mesh.children.length > 0) {
+                    // For OBJ files that return a group with multiple meshes, merge them
+                    const meshes = [];
+                    mesh.traverse(child => {
+                        if (child.geometry) {
+                            meshes.push(child);
+                        }
+                    });
+                    
+                    if (meshes.length === 0) {
+                        throw new Error('No geometry found in loaded model');
+                    } else if (meshes.length === 1) {
+                        geometry = meshes[0].geometry;
+                        finalMesh = meshes[0];
+                    } else {
+                        // Merge multiple geometries
+                        console.log(`Merging ${meshes.length} meshes from OBJ file`);
+                        const mergedGeometry = new THREE.BufferGeometry();
+                        const positions = [];
+                        const normals = [];
+                        
+                        meshes.forEach((m, idx) => {
+                            const geo = m.geometry.clone();
+                            console.log(`Mesh ${idx}: position count = ${geo.attributes.position.count}, has matrix:`, m.matrix);
+                            geo.applyMatrix4(m.matrix);
+                            
+                            const pos = geo.attributes.position.array;
+                            const norm = geo.attributes.normal?.array;
+                            
+                            console.log(`Mesh ${idx}: first 3 positions = [${pos[0]}, ${pos[1]}, ${pos[2]}]`);
+                            
+                            for (let i = 0; i < pos.length; i++) {
+                                positions.push(pos[i]);
+                            }
+                            if (norm) {
+                                for (let i = 0; i < norm.length; i++) {
+                                    normals.push(norm[i]);
+                                }
+                            }
+                        });
+                        
+                        console.log(`Total positions: ${positions.length / 3} vertices`);
+                        console.log(`First merged position: [${positions[0]}, ${positions[1]}, ${positions[2]}]`);
+                        
+                        mergedGeometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+                        if (normals.length > 0) {
+                            mergedGeometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+                        } else {
+                            mergedGeometry.computeVertexNormals();
+                        }
+                        mergedGeometry.computeBoundingBox();
+                        console.log('Merged geometry bbox:', mergedGeometry.boundingBox);
+                        
+                        geometry = mergedGeometry;
+                        
+                        // Create a new mesh with merged geometry
+                        const material = new THREE.MeshPhongMaterial({ 
+                            color: 0x4a90e2,
+                            specular: 0x222222,
+                            shininess: 30
+                        });
+                        finalMesh = new THREE.Mesh(geometry, material);
+                    }
+                } else {
+                    throw new Error('Invalid mesh structure');
+                }
+                
+                console.log('Final geometry for model info:', geometry, 'bbox:', geometry.boundingBox);
+                
+                const obj = addObjectToScene(finalMesh, file.name, geometry);
                 selectObject(obj);
                 
                 // Update info display
@@ -694,7 +782,7 @@ function loadModel() {
     };
     
     // Read file based on format
-    if (extension === 'svg' || extension === 'dxf') {
+    if (extension === 'svg' || extension === 'dxf' || extension === 'obj' || extension === 'ply') {
         reader.readAsText(file);
     } else {
         reader.readAsArrayBuffer(file);
@@ -727,34 +815,52 @@ function loadSTLFromData(data, filename) {
 }
 
 function loadOBJFromData(data, filename) {
-    const loader = new THREE.OBJLoader();
-    const text = new TextDecoder().decode(data);
-    const object = loader.parse(text);
+    console.log('loadOBJFromData called with data type:', typeof data, 'length:', data?.length);
     
-    // Apply material to all meshes
-    object.traverse(function(child) {
-        if (child instanceof THREE.Mesh) {
-            child.material = new THREE.MeshPhongMaterial({ 
-                color: 0x4a90e2,
-                specular: 0x222222,
-                shininess: 30
-            });
-            
-            if (!child.geometry.attributes.normal) {
-                child.geometry.computeVertexNormals();
+    if (!THREE.OBJLoader) {
+        console.error('THREE.OBJLoader is not defined!');
+        throw new Error('OBJLoader not loaded');
+    }
+    
+    try {
+        const loader = new THREE.OBJLoader();
+        console.log('OBJLoader created:', loader);
+        
+        const object = loader.parse(data);
+        console.log('Parsed OBJ object:', object, 'type:', object.type, 'children:', object.children.length);
+        
+        // Apply material to all meshes
+        object.traverse(function(child) {
+            console.log('Traversing child:', child.type, child);
+            if (child instanceof THREE.Mesh) {
+                console.log('Found mesh with geometry:', child.geometry);
+                child.material = new THREE.MeshPhongMaterial({ 
+                    color: 0x4a90e2,
+                    specular: 0x222222,
+                    shininess: 30
+                });
+                
+                if (!child.geometry.attributes.normal) {
+                    child.geometry.computeVertexNormals();
+                }
+                child.geometry.computeBoundingBox();
             }
-            child.geometry.computeBoundingBox();
-        }
-    });
-    
-    // Center the object
-    const box = new THREE.Box3().setFromObject(object);
-    const center = new THREE.Vector3();
-    box.getCenter(center);
-    object.position.sub(center);
-    object.position.z -= box.min.z;
-    
-    return object.children[0] || object;
+        });
+        
+        // Center the object
+        const box = new THREE.Box3().setFromObject(object);
+        const center = new THREE.Vector3();
+        box.getCenter(center);
+        console.log('Centering OBJ at:', center);
+        object.position.sub(center);
+        object.position.z -= box.min.z;
+        
+        return object;  // Return the full group, not just first child
+    } catch (error) {
+        console.error('Error in loadOBJFromData:', error);
+        console.error('Error stack:', error.stack);
+        throw error;
+    }
 }
 
 function loadPLYFromData(data, filename) {
@@ -1047,8 +1153,8 @@ async function sliceModel() {
         if (saveBtn) saveBtn.disabled = false;
         const viewBtn = document.getElementById('view-gcode-btn');
         if (viewBtn) viewBtn.disabled = false;
-        const gcodeToStlBtn = document.getElementById('gcode-to-stl-btn');
-        if (gcodeToStlBtn) gcodeToStlBtn.disabled = false;
+        const gcodeToModelBtn = document.getElementById('gcode-to-model-btn');
+        if (gcodeToModelBtn) gcodeToModelBtn.disabled = false;
         
         progressDiv.innerText = `Complete! ${result.stats.layers} layers, ${sizeDisplay}`;
         if (progressBar) progressBar.style.width = '100%';
@@ -1403,8 +1509,8 @@ function loadGCodeFile() {
         if (saveBtn) saveBtn.disabled = false;
         const viewBtn = document.getElementById('view-gcode-btn');
         if (viewBtn) viewBtn.disabled = false;
-        const gcodeToStlBtn = document.getElementById('gcode-to-stl-btn');
-        if (gcodeToStlBtn) gcodeToStlBtn.disabled = false;
+        const gcodeToModelBtn = document.getElementById('gcode-to-model-btn');
+        if (gcodeToModelBtn) gcodeToModelBtn.disabled = false;
         
         appendLog('GCode loaded: ' + file.name + ' (' + sizeDisplay + ')');
     };
@@ -1612,9 +1718,9 @@ function saveGCodeToDevice() {
 }
 
 /**
- * Convert GCode to STL mesh
+ * Convert GCode to model and add to scene
  */
-async function convertGCodeToSTL() {
+async function convertGCodeToModel() {
     if (!currentGCodeData) {
         alert('No GCode available to convert');
         return;
@@ -1628,13 +1734,13 @@ async function convertGCodeToSTL() {
         }
     }
     
-    const btn = document.getElementById('gcode-to-stl-btn');
+    const btn = document.getElementById('gcode-to-model-btn');
     if (btn) {
         btn.disabled = true;
         btn.innerText = 'Converting...';
     }
     
-    appendLog('Converting GCode to STL with BIG async chunks...');
+    appendLog('Converting GCode to model...');
     
     try {
         const converter = new GCodeToSTL();
@@ -1666,26 +1772,14 @@ async function convertGCodeToSTL() {
         const mesh = new THREE.Mesh(geometry, material);
         
         // Add to scene
-        const filename = currentGCodeData.filename.replace('.gcode', '.stl').replace('.g', '.stl');
+        const filename = currentGCodeData.filename.replace('.gcode', '_model').replace('.g', '_model');
         addObjectToScene(mesh, filename, geometry);
         
-        appendLog(`Converted to STL: ${(geometry.attributes.position.count / 3).toLocaleString()} triangles`);
-        
-        // Export STL file
-        const stlData = converter.exportSTL(geometry);
-        const blob = new Blob([stlData], { type: 'application/octet-stream' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = filename;
-        a.click();
-        URL.revokeObjectURL(url);
-        
-        appendLog('STL file downloaded: ' + filename);
+        appendLog(`Converted to model: ${(geometry.attributes.position.count / 3).toLocaleString()} triangles`);
         
         if (btn) {
             btn.disabled = false;
-            btn.innerText = 'Convert to STL';
+            btn.innerText = 'Convert to Model';
         }
         
     } catch (error) {
@@ -1695,7 +1789,7 @@ async function convertGCodeToSTL() {
         
         if (btn) {
             btn.disabled = false;
-            btn.innerText = 'Convert to STL';
+            btn.innerText = 'Convert to Model';
         }
     }
 }
@@ -1776,3 +1870,109 @@ window.addEventListener('load', function() {
     }
 });
 
+/**
+ * Export model (selected object or entire scene)
+ */
+async function exportModel() {
+    const exportScene = document.getElementById('export-scene-checkbox').checked;
+    const format = document.getElementById('export-format').value;
+    const exportBtn = document.getElementById('export-btn');
+    const progressDiv = document.getElementById('export-progress');
+    const progressBar = document.getElementById('export-progress-bar');
+    
+    try {
+        const exporter = new ModelExporter();
+        
+        // Disable export button during export
+        if (exportBtn) exportBtn.disabled = true;
+        if (progressDiv) progressDiv.innerText = 'Preparing...';
+        if (progressBar) progressBar.style.width = '0%';
+        
+        const progressCallback = (percent, message) => {
+            if (progressDiv) progressDiv.innerText = message;
+            if (progressBar) progressBar.style.width = `${percent}%`;
+        };
+        
+        if (!exportScene) {
+            // Export selected object with transforms applied
+            if (!selectedObject || !selectedObject.geometry) {
+                alert('No object selected. Check "Export Entire Scene" to export all objects.');
+                if (exportBtn) exportBtn.disabled = false;
+                if (progressDiv) progressDiv.innerText = '';
+                if (progressBar) progressBar.style.width = '0%';
+                return;
+            }
+            
+            // Clone geometry and apply transforms
+            const geometry = selectedObject.geometry.clone();
+            geometry.applyMatrix4(selectedObject.mesh.matrix);
+            
+            const filename = selectedObject.filename || 'model';
+            const exported = await exporter.export(geometry, filename, format, progressCallback);
+            appendLog(`Exported: ${exported}`);
+            
+        } else {
+            // Export entire scene
+            if (loadedObjects.length === 0) {
+                alert('No objects in scene');
+                if (exportBtn) exportBtn.disabled = false;
+                if (progressDiv) progressDiv.innerText = '';
+                if (progressBar) progressBar.style.width = '0%';
+                return;
+            }
+            
+            if (progressDiv) progressDiv.innerText = 'Merging geometries...';
+            
+            // Merge all object geometries into one
+            const mergedGeometry = new THREE.BufferGeometry();
+            const positions = [];
+            const normals = [];
+            
+            loadedObjects.forEach(obj => {
+                if (!obj.geometry) return;
+                
+                const geo = obj.geometry.clone();
+                geo.applyMatrix4(obj.mesh.matrix);
+                
+                const pos = geo.attributes.position.array;
+                const norm = geo.attributes.normal ? geo.attributes.normal.array : null;
+                
+                for (let i = 0; i < pos.length; i += 3) {
+                    positions.push(pos[i], pos[i + 1], pos[i + 2]);
+                    if (norm) {
+                        normals.push(norm[i], norm[i + 1], norm[i + 2]);
+                    }
+                }
+            });
+            
+            mergedGeometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+            if (normals.length > 0) {
+                mergedGeometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+            } else {
+                mergedGeometry.computeVertexNormals();
+            }
+            
+            const exported = await exporter.export(mergedGeometry, 'scene', format, progressCallback);
+            appendLog(`Exported scene: ${exported}`);
+        }
+        
+        if (progressDiv) progressDiv.innerText = 'Export complete!';
+        if (progressBar) progressBar.style.width = '100%';
+        
+        // Re-enable button after a delay
+        setTimeout(() => {
+            if (exportBtn) exportBtn.disabled = false;
+            if (progressDiv) progressDiv.innerText = '';
+            if (progressBar) progressBar.style.width = '0%';
+        }, 2000);
+        
+    } catch (error) {
+        appendLog('Export failed: ' + error.message);
+        console.error('Export error:', error);
+        alert('Export failed: ' + error.message);
+        
+        if (exportBtn) exportBtn.disabled = false;
+        if (progressDiv) progressDiv.innerText = 'Export failed';
+        if (progressBar) progressBar.style.width = '0%';
+    }
+}
