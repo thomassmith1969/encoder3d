@@ -7,7 +7,7 @@
     <link rel="stylesheet" href="css/style.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/STLLoader.js"></script>
 </head>
 <body>
     <div id="app">
@@ -77,13 +77,110 @@
                 </div>
             </div>
             <div class="panel">
-                <h2>Job</h2>
-                <input type="file" id="gcode-upload">
-                <button onclick="uploadGCode()">Upload & Print</button>
+                <h2>Job Status</h2>
+                <div style="font-size:0.9em;">
+                    <div>State: <span id="job-state-left" style="color:#999">idle</span></div>
+                    <div>Progress: <span id="job-progress-left" style="color:#999\">0%</span></div>
+                    <div>File: <span id="job-filename-left" style="color:#999">--</span></div>
+                </div>
             </div>
         </div>
         <div id="viewer-container">
+            <!-- View Controls -->
+            <div id="view-controls">
+                <label><input type="checkbox" id="show-toolhead" checked onchange="toggleToolheadView()"> Toolhead</label>
+                <label><input type="checkbox" id="show-gcode-view" checked onchange="toggleGCodeView()"> GCode</label>
+                <label><input type="checkbox" id="show-objects" checked onchange="toggleObjectsView()"> Objects</label>
+            </div>
+            
+            <!-- Object List & Manipulation -->
+            <div id="object-panel">
+                <div class="panel-header">
+                    <strong>Loaded Objects</strong>
+                    <button onclick="addNewSTL()" style="padding: 2px 8px; font-size: 0.85em;">+ Add STL</button>
+                </div>
+                <div id="object-list"></div>
+                <div id="object-transform" style="display: none;">
+                    <hr style="border-color: #444; margin: 10px 0;">
+                    <div style="margin-bottom: 8px;"><strong>Transform: <span id="selected-obj-name"></span></strong></div>
+                    <div class="transform-row">
+                        <label>X: <input type="number" id="obj-pos-x" step="1" value="0" onchange="applyTransform()"></label>
+                        <label>Y: <input type="number" id="obj-pos-y" step="1" value="0" onchange="applyTransform()"></label>
+                        <label>Z: <input type="number" id="obj-pos-z" step="1" value="0" onchange="applyTransform()"></label>
+                    </div>
+                    <div class="transform-row">
+                        <label>Rot X: <input type="number" id="obj-rot-x" step="15" value="0" onchange="applyTransform()"></label>
+                        <label>Rot Y: <input type="number" id="obj-rot-y" step="15" value="0" onchange="applyTransform()"></label>
+                        <label>Rot Z: <input type="number" id="obj-rot-z" step="15" value="0" onchange="applyTransform()"></label>
+                    </div>
+                    <div class="transform-row">
+                        <label>Scale: <input type="number" id="obj-scale" step="10" value="100" onchange="applyTransform()">%</label>
+                        <button onclick="resetTransform()" style="padding: 4px 8px;">Reset</button>
+                    </div>
+                </div>
+            </div>
+            
             <!-- Three.js Canvas will be injected here -->
+        </div>
+        <div id="right-panel">
+            <h2>Files & Printing</h2>
+            
+            <!-- STL Section -->
+            <div class="panel">
+                <h3>STL Model</h3>
+                <input type="file" id="stl-upload" accept=".stl">
+                <button onclick="loadSTL()">Load STL</button>
+                <div id="stl-info" style="margin-top:8px; font-size:0.9em; color:#999;"></div>
+            </div>
+            
+            <!-- Slicer Section -->
+            <div class="panel">
+                <h3>Slicer Settings</h3>
+                <div style="font-size:0.9em;">
+                    <div style="margin-bottom:4px;">Layer Height: <input type="number" id="slice-layer-height" value="0.2" step="0.05" style="width:60px"> mm</div>
+                    <div style="margin-bottom:4px;">Infill: <input type="number" id="slice-infill" value="20" min="0" max="100" style="width:50px">%</div>
+                    <div style="margin-bottom:4px;">Print Speed: <input type="number" id="slice-speed" value="60" style="width:50px"> mm/s</div>
+                    <div style="margin-bottom:4px;">Nozzle Temp: <input type="number" id="slice-temp" value="200" style="width:50px">°C</div>
+                    <div style="margin-bottom:4px;">Bed Temp: <input type="number" id="slice-bed-temp" value="60" style="width:50px">°C</div>
+                </div>
+                <button onclick="sliceModel()" id="slice-btn" disabled>Slice to GCode</button>
+                <div id="slice-progress" style="margin-top:8px; font-size:0.9em; color:#4ec9b0;"></div>
+            </div>
+            
+            <!-- GCode Section -->
+            <div class="panel">
+                <h3>GCode File</h3>
+                <input type="file" id="gcode-file-input" accept=".gcode,.g">
+                <button onclick="loadGCodeFile()">Load GCode</button>
+                <div id="gcode-info" style="margin-top:8px; font-size:0.9em;">
+                    <div>File: <span id="gcode-filename" style="color:#999">none</span></div>
+                    <div>Lines: <span id="gcode-lines" style="color:#999">0</span></div>
+                    <div>Est. Time: <span id="gcode-time" style="color:#999">--</span></div>
+                </div>
+            </div>
+            
+            <!-- Preview Controls -->
+            <div class="panel">
+                <h3>Preview</h3>
+                <button onclick="toggleGCodePreview()" id="preview-btn" disabled>Show Preview</button>
+                <div style="margin-top:8px;">
+                    <label><input type="checkbox" id="show-moves" checked> Travel Moves</label><br>
+                    <label><input type="checkbox" id="show-extrusions" checked> Extrusions</label><br>
+                    <label style="margin-top:4px; display:inline-block;">Layer: <input type="range" id="layer-slider" min="0" max="0" value="0" disabled style="width:120px"> <span id="layer-num">0</span></label>
+                </div>
+            </div>
+            
+            <!-- Print Controls -->
+            <div class="panel">
+                <h3>Print Job</h3>
+                <button onclick="uploadAndPrint()" id="print-btn" disabled>Upload & Print</button>
+                <button onclick="printFromServer()">Print from Server</button>
+                <div id="print-status" style="margin-top:8px; font-size:0.9em;">
+                    <div>State: <span id="job-state" style="color:#999">idle</span></div>
+                    <div>Progress: <span id="job-progress" style="color:#999">0%</span></div>
+                    <div>File: <span id="job-filename" style="color:#999">--</span></div>
+                </div>
+            </div>
         </div>
     </div>
     <script src="js/app.js"></script>
