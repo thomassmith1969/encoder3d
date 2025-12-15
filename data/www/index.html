@@ -11,6 +11,11 @@
     <script src="js/OBJLoader.js"></script>
     <script src="js/PLYLoader.js"></script>
     <script src="js/SVGLoader.js"></script>
+    <!-- Slicer modules -->
+    <script src="js/slicer/slicer-core.js"></script>
+    <script src="js/slicer/slicer-paths.js"></script>
+    <script src="js/slicer/slicer-gcode.js"></script>
+    <script src="js/slicer/slicer-main.js"></script>
 </head>
 <body>
     <div id="app">
@@ -164,7 +169,20 @@
                 <div id="gcode-info" style="margin-top:8px; font-size:0.9em;">
                     <div>File: <span id="gcode-filename" style="color:#999">none</span></div>
                     <div>Lines: <span id="gcode-lines" style="color:#999">0</span></div>
+                    <div>Size: <span id="gcode-size" style="color:#999">0 KB</span></div>
                     <div>Est. Time: <span id="gcode-time" style="color:#999">--</span></div>
+                </div>
+                <div style="margin-top:8px;">
+                    <button onclick="downloadGCode()" id="download-btn" disabled>Download GCode</button>
+                    <button onclick="saveGCodeToDevice()" id="save-btn" disabled>Save to Device</button>
+                    <button onclick="toggleGCodePreview()" id="view-gcode-btn" disabled>View Sample</button>
+                </div>
+                <div id="gcode-viewer" style="display:none; margin-top:8px;">
+                    <div style="font-size:0.8em; color:#999; margin-bottom:4px;">
+                        First <input type="number" id="preview-lines" value="100" min="10" max="10000" style="width:60px"> lines:
+                        <button onclick="updateGCodePreview()" style="padding:2px 6px; font-size:0.8em;">Refresh</button>
+                    </div>
+                    <textarea id="gcode-content" readonly style="width:100%; height:300px; font-family:monospace; font-size:0.75em; background:#1a1a1a; color:#0f0; border:1px solid #444; padding:4px;"></textarea>
                 </div>
             </div>
             
