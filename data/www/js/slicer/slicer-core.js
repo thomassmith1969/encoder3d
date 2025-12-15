@@ -36,16 +36,20 @@ class SlicerCore {
         const maxZ = bbox.max.z + (transform.position.z || 0);
         
         const layerHeight = settings.layerHeight || 0.2;
-        const numLayers = Math.ceil((maxZ - minZ) / layerHeight);
+        // Add 1 to ensure we slice all the way through the top
+        const numLayers = Math.ceil((maxZ - minZ) / layerHeight) + 1;
 
         console.log(`Slicing: ${numLayers} layers from Z=${minZ.toFixed(2)} to Z=${maxZ.toFixed(2)}`);
 
         // Slice each layer
         for (let i = 0; i < numLayers; i++) {
             const z = minZ + (i * layerHeight);
-            const layer = this.sliceLayer(geometry, z, transform, i);
-            if (layer && layer.segments.length > 0) {
-                this.layers.push(layer);
+            // Only slice if within bounds
+            if (z <= maxZ + layerHeight * 0.1) {
+                const layer = this.sliceLayer(geometry, z, transform, i);
+                if (layer && layer.segments.length > 0) {
+                    this.layers.push(layer);
+                }
             }
         }
 

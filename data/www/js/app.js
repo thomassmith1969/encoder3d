@@ -518,6 +518,62 @@ function toggleObjectPanel() {
     }
 }
 
+// Make object panel draggable
+function initDraggablePanel() {
+    const panel = document.getElementById('object-panel');
+    const header = panel.querySelector('.panel-header');
+    
+    let isDragging = false;
+    let currentX;
+    let currentY;
+    let initialX;
+    let initialY;
+    
+    header.addEventListener('mousedown', (e) => {
+        // Don't drag if clicking the toggle icon
+        if (e.target.id === 'panel-toggle-icon' || e.target.closest('#panel-toggle-icon')) {
+            return;
+        }
+        
+        isDragging = true;
+        initialX = e.clientX - panel.offsetLeft;
+        initialY = e.clientY - panel.offsetTop;
+        
+        header.style.cursor = 'grabbing';
+    });
+    
+    document.addEventListener('mousemove', (e) => {
+        if (isDragging) {
+            e.preventDefault();
+            currentX = e.clientX - initialX;
+            currentY = e.clientY - initialY;
+            
+            // Keep panel within viewport
+            const maxX = window.innerWidth - panel.offsetWidth;
+            const maxY = window.innerHeight - panel.offsetHeight;
+            
+            currentX = Math.max(0, Math.min(currentX, maxX));
+            currentY = Math.max(0, Math.min(currentY, maxY));
+            
+            panel.style.left = currentX + 'px';
+            panel.style.top = currentY + 'px';
+            panel.style.right = 'auto';
+        }
+    });
+    
+    document.addEventListener('mouseup', () => {
+        isDragging = false;
+        header.style.cursor = 'move';
+    });
+}
+
+// Call after DOM loaded
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initDraggablePanel);
+} else {
+    initDraggablePanel();
+}
+
 // View toggle functions
 function toggleToolheadView() {
     const show = document.getElementById('show-toolhead').checked;

@@ -56,21 +56,22 @@ body {
 }
 
 #object-panel {
-    position: absolute;
-    bottom: 10px;
-    left: 10px;
-    width: 280px;
-    max-height: 500px;
-    background: rgba(37, 37, 38, 0.95);
-    border: 1px solid #444;
-    border-radius: 4px;
-    z-index: 100;
+    position: fixed;
+    top: 60px;
+    right: 10px;
+    width: 300px;
+    max-height: 600px;
+    background: rgba(37, 37, 38, 0.98);
+    border: 1px solid #555;
+    border-radius: 6px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+    z-index: 1000;
     overflow: hidden;
-    transition: all 0.3s ease;
+    transition: max-height 0.3s ease;
 }
 
 #object-panel.collapsed {
-    max-height: 40px;
+    max-height: 42px;
 }
 
 #object-panel.collapsed #object-panel-content {
@@ -82,13 +83,16 @@ body {
     justify-content: space-between;
     align-items: center;
     padding: 10px 12px;
-    background: rgba(45, 45, 48, 0.9);
+    background: rgba(45, 45, 48, 0.95);
     user-select: none;
+    cursor: move;
+    border-bottom: 1px solid #444;
 }
 
 #panel-toggle-icon {
     font-size: 0.8em;
     transition: transform 0.3s ease;
+    cursor: pointer;
 }
 
 #object-panel.collapsed #panel-toggle-icon {
@@ -97,7 +101,9 @@ body {
 
 #object-panel-content {
     padding: 0 12px 12px 12px;
-    max-height: 450px;
+    max-height: 550px;
+    overflow-y: auto;
+}
     overflow-y: auto;
 }
 

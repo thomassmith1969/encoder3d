@@ -19,6 +19,39 @@
 </head>
 <body>
     <div id="app">
+        <!-- Object List & Manipulation - draggable dialog floating over everything -->
+        <div id="object-panel" class="collapsed">
+            <div class="panel-header">
+                <strong>Objects (<span id="object-count">0</span>)</strong>
+                <span id="panel-toggle-icon" onclick="toggleObjectPanel()">▼</span>
+            </div>
+            <div id="object-panel-content">
+                <div style="margin: 10px 0;">
+                    <input type="file" id="stl-upload-multi" accept=".stl,.obj,.ply,.svg,.dxf,.3mf" onchange="loadModel()" style="display: none;">
+                    <button onclick="addNewModel()" style="width: 100%; padding: 6px;">+ Add Model</button>
+                </div>
+                <div id="object-list"></div>
+                <div id="object-transform" style="display: none;">
+                    <hr style="border-color: #444; margin: 10px 0;">
+                    <div style="margin-bottom: 8px;"><strong>Transform: <span id="selected-obj-name"></span></strong></div>
+                    <div class="transform-row">
+                        <label>X: <input type="number" id="obj-pos-x" step="1" value="0" onchange="applyTransform()"></label>
+                        <label>Y: <input type="number" id="obj-pos-y" step="1" value="0" onchange="applyTransform()"></label>
+                        <label>Z: <input type="number" id="obj-pos-z" step="1" value="0" onchange="applyTransform()"></label>
+                    </div>
+                    <div class="transform-row">
+                        <label>Rot X: <input type="number" id="obj-rot-x" step="15" value="0" onchange="applyTransform()"></label>
+                        <label>Rot Y: <input type="number" id="obj-rot-y" step="15" value="0" onchange="applyTransform()"></label>
+                        <label>Rot Z: <input type="number" id="obj-rot-z" step="15" value="0" onchange="applyTransform()"></label>
+                    </div>
+                    <div class="transform-row">
+                        <label>Scale: <input type="number" id="obj-scale" step="10" value="100" onchange="applyTransform()">%</label>
+                        <button onclick="resetTransform()" style="padding: 4px 8px;">Reset</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
         <div id="sidebar">
                 <div style="display: flex; justify-content: space-between; align-items: center;">
                 <h1>Encoder3D</h1>
@@ -99,39 +132,6 @@
                 <label><input type="checkbox" id="show-toolhead" checked onchange="toggleToolheadView()"> Toolhead</label>
                 <label><input type="checkbox" id="show-gcode-view" checked onchange="toggleGCodeView()"> GCode</label>
                 <label><input type="checkbox" id="show-objects" checked onchange="toggleObjectsView()"> Objects</label>
-            </div>
-            
-            <!-- Object List & Manipulation -->
-            <div id="object-panel" class="collapsed">
-                <div class="panel-header" onclick="toggleObjectPanel()" style="cursor: pointer;">
-                    <strong>Objects (<span id="object-count">0</span>)</strong>
-                    <span id="panel-toggle-icon">▼</span>
-                </div>
-                <div id="object-panel-content">
-                    <div style="margin: 10px 0;">
-                        <input type="file" id="stl-upload-multi" accept=".stl,.obj,.ply,.svg,.dxf,.3mf" onchange="loadModel()" style="display: none;">
-                        <button onclick="addNewModel()" style="width: 100%; padding: 6px;">+ Add Model</button>
-                    </div>
-                    <div id="object-list"></div>
-                    <div id="object-transform" style="display: none;">
-                        <hr style="border-color: #444; margin: 10px 0;">
-                        <div style="margin-bottom: 8px;"><strong>Transform: <span id="selected-obj-name"></span></strong></div>
-                        <div class="transform-row">
-                            <label>X: <input type="number" id="obj-pos-x" step="1" value="0" onchange="applyTransform()"></label>
-                            <label>Y: <input type="number" id="obj-pos-y" step="1" value="0" onchange="applyTransform()"></label>
-                            <label>Z: <input type="number" id="obj-pos-z" step="1" value="0" onchange="applyTransform()"></label>
-                        </div>
-                        <div class="transform-row">
-                            <label>Rot X: <input type="number" id="obj-rot-x" step="15" value="0" onchange="applyTransform()"></label>
-                            <label>Rot Y: <input type="number" id="obj-rot-y" step="15" value="0" onchange="applyTransform()"></label>
-                            <label>Rot Z: <input type="number" id="obj-rot-z" step="15" value="0" onchange="applyTransform()"></label>
-                        </div>
-                        <div class="transform-row">
-                            <label>Scale: <input type="number" id="obj-scale" step="10" value="100" onchange="applyTransform()">%</label>
-                            <button onclick="resetTransform()" style="padding: 4px 8px;">Reset</button>
-                        </div>
-                    </div>
-                </div>
             </div>
             
             <!-- Three.js Canvas will be injected here -->
