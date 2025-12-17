@@ -8,7 +8,13 @@ class ModelExporter {
      * Export geometry to STL format (binary) - async with progress
      */
     async exportSTL(geometry, filename = 'model.stl', progressCallback = null) {
-        const triangleCount = geometry.attributes.position.count / 3;
+        // Calculate actual triangle count (handle indexed geometry)
+        const triangleCount = geometry.index 
+            ? geometry.index.count / 3 
+            : geometry.attributes.position.count / 3;
+        
+        console.log(`STL Export: ${triangleCount} triangles, ${geometry.attributes.position.count} vertices`);
+        
         const buffer = new ArrayBuffer(84 + triangleCount * 50);
         const view = new DataView(buffer);
         
@@ -23,6 +29,7 @@ class ModelExporter {
         
         const positions = geometry.attributes.position.array;
         const normals = geometry.attributes.normal ? geometry.attributes.normal.array : null;
+        const indices = geometry.index ? geometry.index.array : null;
         
         let offset = 84;
         const chunkSize = 5000; // Process 5000 triangles at a time
@@ -31,46 +38,59 @@ class ModelExporter {
             const end = Math.min(start + chunkSize, triangleCount);
             
             for (let i = start; i < end; i++) {
-                const idx = i * 9;
-                
-                // Calculate normal if not provided
-                let nx = 0, ny = 0, nz = 0;
-                if (normals) {
-                    nx = normals[idx];
-                    ny = normals[idx + 1];
-                    nz = normals[idx + 2];
+                // Get vertex indices for this triangle
+                let i1, i2, i3;
+                if (indices) {
+                    // Indexed geometry
+                    i1 = indices[i * 3];
+                    i2 = indices[i * 3 + 1];
+                    i3 = indices[i * 3 + 2];
                 } else {
-                    // Calculate from vertices
-                    const v1x = positions[idx + 0], v1y = positions[idx + 1], v1z = positions[idx + 2];
-                    const v2x = positions[idx + 3], v2y = positions[idx + 4], v2z = positions[idx + 5];
-                    const v3x = positions[idx + 6], v3y = positions[idx + 7], v3z = positions[idx + 8];
-                    
-                    const ux = v2x - v1x, uy = v2y - v1y, uz = v2z - v1z;
-                    const vx = v3x - v1x, vy = v3y - v1y, vz = v3z - v1z;
-                    
-                    nx = uy * vz - uz * vy;
-                    ny = uz * vx - ux * vz;
-                    nz = ux * vy - uy * vx;
-                    
-                    const len = Math.sqrt(nx * nx + ny * ny + nz * nz);
-                    if (len > 0) {
-                        nx /= len; ny /= len; nz /= len;
-                    }
+                    // Non-indexed geometry
+                    i1 = i * 3;
+                    i2 = i * 3 + 1;
+                    i3 = i * 3 + 2;
                 }
                 
-                // Normal
+                // Get vertex positions
+                const v1x = positions[i1 * 3], v1y = positions[i1 * 3 + 1], v1z = positions[i1 * 3 + 2];
+                const v2x = positions[i2 * 3], v2y = positions[i2 * 3 + 1], v2z = positions[i2 * 3 + 2];
+                const v3x = positions[i3 * 3], v3y = positions[i3 * 3 + 1], v3z = positions[i3 * 3 + 2];
+                
+                // Calculate normal
+                const ux = v2x - v1x, uy = v2y - v1y, uz = v2z - v1z;
+                const vx = v3x - v1x, vy = v3y - v1y, vz = v3z - v1z;
+                
+                let nx = uy * vz - uz * vy;
+                let ny = uz * vx - ux * vz;
+                let nz = ux * vy - uy * vx;
+                
+                const len = Math.sqrt(nx * nx + ny * ny + nz * nz);
+                if (len > 0) {
+                    nx /= len; ny /= len; nz /= len;
+                }
+                
+                // Write normal
                 view.setFloat32(offset, nx, true);
                 view.setFloat32(offset + 4, ny, true);
                 view.setFloat32(offset + 8, nz, true);
                 offset += 12;
                 
-                // Vertices
-                for (let j = 0; j < 3; j++) {
-                    view.setFloat32(offset, positions[idx + j * 3], true);
-                    view.setFloat32(offset + 4, positions[idx + j * 3 + 1], true);
-                    view.setFloat32(offset + 8, positions[idx + j * 3 + 2], true);
-                    offset += 12;
-                }
+                // Write vertices
+                view.setFloat32(offset, v1x, true);
+                view.setFloat32(offset + 4, v1y, true);
+                view.setFloat32(offset + 8, v1z, true);
+                offset += 12;
+                
+                view.setFloat32(offset, v2x, true);
+                view.setFloat32(offset + 4, v2y, true);
+                view.setFloat32(offset + 8, v2z, true);
+                offset += 12;
+                
+                view.setFloat32(offset, v3x, true);
+                view.setFloat32(offset + 4, v3y, true);
+                view.setFloat32(offset + 8, v3z, true);
+                offset += 12;
                 
                 // Attribute byte count
                 view.setUint16(offset, 0, true);

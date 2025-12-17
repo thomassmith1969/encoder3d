@@ -17,6 +17,12 @@ function populateConfig(doc) {
         document.getElementById('cfg-maxf-z').value = Number(doc.maxFeedrate.z);
         document.getElementById('cfg-maxf-e').value = Number(doc.maxFeedrate.e);
     }
+    
+    // Load CSG settings from localStorage
+    const csgThreads = localStorage.getItem('csgThreads');
+    if (document.getElementById('cfg-csg-threads')) {
+        document.getElementById('cfg-csg-threads').value = csgThreads || '';
+    }
 }
 
 function loadConfig() {
@@ -47,6 +53,18 @@ function saveConfig() {
             e: parseInt(document.getElementById('cfg-maxf-e').value)
         }
     };
+    
+    // Save CSG settings to localStorage
+    const csgThreadsInput = document.getElementById('cfg-csg-threads');
+    if (csgThreadsInput) {
+        const csgThreads = csgThreadsInput.value;
+        if (csgThreads) {
+            localStorage.setItem('csgThreads', csgThreads);
+        } else {
+            localStorage.removeItem('csgThreads');
+        }
+    }
+    
     fetch('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
         .then(r => r.json()).then(j => { alert('Config saved'); }).catch(e => { alert('Config save failed'); console.error(e); });
 }

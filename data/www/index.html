@@ -5,12 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Encoder3D Controller</title>
     <link rel="stylesheet" href="css/style.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="js/three.r128.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
     <script src="js/STLLoader.js"></script>
     <script src="js/OBJLoader.js"></script>
     <script src="js/PLYLoader.js"></script>
     <script src="js/SVGLoader.js"></script>
+    <script src="js/three-mesh-bvh.umd.cjs"></script>
+    <script src="js/three-bvh-csg.umd.cjs"></script>
+    <script src="js/csg-init.js"></script>
     <script src="js/model-exporter.js"></script>
     <!-- Slicer modules -->
     <script src="js/slicer/slicer-core.js"></script>
@@ -48,6 +51,14 @@
                     <div class="transform-row">
                         <label>Scale: <input type="number" id="obj-scale" step="10" value="100" onchange="applyTransform()">%</label>
                         <button onclick="resetTransform()" style="padding: 4px 8px;">Reset</button>
+                    </div>
+                    <div class="transform-row">
+                        <label>Mode: 
+                            <select id="obj-mode" onchange="applyMode()" style="padding: 4px;">
+                                <option value="additive">Additive</option>
+                                <option value="subtractive">Subtractive</option>
+                            </select>
+                        </label>
                     </div>
                     <div style="font-size: 0.85em; color: #999; margin-top: 4px;">
                         Size: <span id="obj-actual-size">--</span>

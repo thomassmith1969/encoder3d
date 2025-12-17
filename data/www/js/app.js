@@ -391,6 +391,7 @@ function addObjectToScene(mesh, filename, geometry) {
         geometry: geometry,
         filename: filename,
         originalSize: originalSize,
+        mode: 'additive',  // 'additive' or 'subtractive'
         transform: {
             position: { x: 0, y: 0, z: 0 },
             rotation: { x: 0, y: 0, z: 0 },
@@ -437,7 +438,34 @@ function selectObject(obj) {
     document.getElementById('obj-rot-y').value = Math.round(obj.transform.rotation.y * 180 / Math.PI);
     document.getElementById('obj-rot-z').value = Math.round(obj.transform.rotation.z * 180 / Math.PI);
     document.getElementById('obj-scale').value = obj.transform.scale * 100;
+    document.getElementById('obj-mode').value = obj.mode || 'additive';
+    
+    // Update mesh material color based on mode
+    updateMeshMaterial(obj);
+    
     updateSizeDisplay();
+}
+
+function applyMode() {
+    if (!selectedObject) return;
+    
+    const mode = document.getElementById('obj-mode').value;
+    selectedObject.mode = mode;
+    
+    // Update mesh material color
+    updateMeshMaterial(selectedObject);
+    updateObjectList();
+}
+
+function updateMeshMaterial(obj) {
+    const isSubtractive = obj.mode === 'subtractive';
+    const color = isSubtractive ? 0xe24a4a : 0x4a90e2;  // Red for subtractive, blue for additive
+    
+    obj.mesh.traverse(child => {
+        if (child.material) {
+            child.material.color.setHex(color);
+        }
+    });
 }
 
 function applyTransform() {
@@ -513,8 +541,12 @@ function updateObjectList() {
         item.onclick = () => selectObject(obj);
         
         const name = document.createElement('span');
-        name.innerText = obj.filename;
+        const modeIcon = obj.mode === 'subtractive' ? '➖ ' : '➕ ';
+        name.innerText = modeIcon + obj.filename;
         name.style.flexGrow = '1';
+        if (obj.mode === 'subtractive') {
+            name.style.color = '#e24a4a';
+        }
         
         const actions = document.createElement('div');
         actions.className = 'object-item-actions';
@@ -690,7 +722,7 @@ function loadModel() {
                     // For OBJ files that return a group with multiple meshes, merge them
                     const meshes = [];
                     mesh.traverse(child => {
-                        if (child.geometry) {
+                        if (child.geometry && child.geometry.attributes.position && child.geometry.attributes.position.count > 0) {
                             meshes.push(child);
                         }
                     });
@@ -1871,6 +1903,63 @@ window.addEventListener('load', function() {
 });
 
 /**
+ * Convert sliced layers to Three.js geometry
+ */
+async function convertLayersToGeometry(layers, layerHeight, progressCallback, progressStart, progressEnd) {
+    const positions = [];
+    const indices = [];
+    let vertexIndex = 0;
+    const progressRange = progressEnd - progressStart;
+    
+    for (let layerIdx = 0; layerIdx < layers.length; layerIdx++) {
+        const layer = layers[layerIdx];
+        
+        if (!layer || (!layer.z && layer.z !== 0) || !layer.perimeters || layer.perimeters.length === 0) {
+            continue;
+        }
+        
+        layer.perimeters.forEach(perimeter => {
+            if (!perimeter || !perimeter.points || perimeter.points.length < 2) return;
+            
+            const points = perimeter.points;
+            for (let i = 0; i < points.length - 1; i++) {
+                const p1 = points[i];
+                const p2 = points[i + 1];
+                
+                if (!p1 || !p2 || p1.x === undefined || p1.y === undefined || p2.x === undefined || p2.y === undefined) {
+                    continue;
+                }
+                
+                positions.push(p1.x, layer.z, p1.y);
+                positions.push(p2.x, layer.z, p2.y);
+                positions.push(p1.x, layer.z + layerHeight, p1.y);
+                positions.push(p2.x, layer.z + layerHeight, p2.y);
+                
+                indices.push(vertexIndex, vertexIndex + 1, vertexIndex + 2);
+                indices.push(vertexIndex + 1, vertexIndex + 3, vertexIndex + 2);
+                vertexIndex += 4;
+            }
+        });
+        
+        if (layerIdx % 10 === 0) {
+            const progress = progressStart + (layerIdx / layers.length) * progressRange;
+            progressCallback(progress, `Converting layer ${layerIdx + 1}/${layers.length}...`);
+            await new Promise(resolve => setTimeout(resolve, 0));
+        }
+    }
+    
+    if (positions.length === 0) {
+        throw new Error('No geometry generated from slicing');
+    }
+    
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geometry.setIndex(indices);
+    geometry.computeVertexNormals();
+    return geometry;
+}
+
+/**
  * Export model (selected object or entire scene)
  */
 async function exportModel() {
@@ -1903,13 +1992,142 @@ async function exportModel() {
                 return;
             }
             
-            // Clone geometry and apply transforms
-            const geometry = selectedObject.geometry.clone();
-            geometry.applyMatrix4(selectedObject.mesh.matrix);
+            // Check if there are any subtractive objects
+            const subtractiveObjects = loadedObjects.filter(obj => obj.mode === 'subtractive' && obj !== selectedObject);
             
-            const filename = selectedObject.filename || 'model';
-            const exported = await exporter.export(geometry, filename, format, progressCallback);
-            appendLog(`Exported: ${exported}`);
+            if (subtractiveObjects.length > 0 && selectedObject.mode !== 'subtractive') {
+                // Apply CSG subtraction
+                try {
+                    progressCallback(10, 'Applying boolean operations...');
+                    
+                    let resultGeometry = selectedObject.geometry.clone();
+                    resultGeometry.applyMatrix4(selectedObject.mesh.matrix);
+                    
+                    // Create mesh for CSG
+                    let resultMesh = new THREE.Mesh(resultGeometry);
+                    resultMesh.updateMatrixWorld(true);
+                    
+                    // Show modal for CSG operation
+                    const csgModal = document.createElement('div');
+                    csgModal.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#2a2a2a;padding:30px;border-radius:8px;z-index:10000;box-shadow:0 4px 20px rgba(0,0,0,0.5);min-width:300px;text-align:center';
+                    csgModal.innerHTML = '<div style="font-size:18px;margin-bottom:15px">Applying Boolean Operations...</div><div id="csg-progress-text" style="color:#4a90e2;font-size:14px">Starting...</div>';
+                    document.body.appendChild(csgModal);
+                    
+                    const updateCSGModal = (msg) => {
+                        const progressText = document.getElementById('csg-progress-text');
+                        if (progressText) progressText.innerText = msg;
+                    };
+                    
+                    // Subtract each subtractive object using three-bvh-csg
+                    const { Brush, Evaluator, SUBTRACTION } = window.THREEDCSG;
+                    const evaluator = new Evaluator();
+                    
+                    for (let i = 0; i < subtractiveObjects.length; i++) {
+                        const subObj = subtractiveObjects[i];
+                        const baseProgress = 10 + (i / subtractiveObjects.length) * 70;
+                        
+                        updateCSGModal(`Subtracting object ${i + 1}/${subtractiveObjects.length}...`);
+                        progressCallback(baseProgress, `Subtracting object ${i + 1}/${subtractiveObjects.length}...`);
+                        
+                        // Run async to prevent UI freeze
+                        await new Promise(resolve => {
+                            setTimeout(() => {
+                                // Clone and prepare geometries - ensure they're indexed
+                                const geomA = resultMesh.geometry.clone();
+                                if (!geomA.index) {
+                                    geomA.setIndex(null);
+                                    const posArray = geomA.attributes.position.array;
+                                    const indices = [];
+                                    for (let i = 0; i < posArray.length / 3; i++) {
+                                        indices.push(i);
+                                    }
+                                    geomA.setIndex(indices);
+                                }
+                                if (!geomA.attributes.normal) {
+                                    geomA.computeVertexNormals();
+                                }
+                                if (!geomA.attributes.uv) {
+                                    const uvArray = new Float32Array(geomA.attributes.position.count * 2);
+                                    geomA.setAttribute('uv', new THREE.BufferAttribute(uvArray, 2));
+                                }
+                                
+                                const geomB = subObj.mesh.geometry.clone();
+                                if (!geomB.index) {
+                                    geomB.setIndex(null);
+                                    const posArray = geomB.attributes.position.array;
+                                    const indices = [];
+                                    for (let i = 0; i < posArray.length / 3; i++) {
+                                        indices.push(i);
+                                    }
+                                    geomB.setIndex(indices);
+                                }
+                                if (!geomB.attributes.normal) {
+                                    geomB.computeVertexNormals();
+                                }
+                                if (!geomB.attributes.uv) {
+                                    const uvArray = new Float32Array(geomB.attributes.position.count * 2);
+                                    geomB.setAttribute('uv', new THREE.BufferAttribute(uvArray, 2));
+                                }
+                                
+                                // Build BVH trees for CSG operations
+                                const { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } = window.MeshBVHLib;
+                                THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
+                                THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
+                                THREE.Mesh.prototype.raycast = acceleratedRaycast;
+                                
+                                geomA.computeBoundsTree();
+                                geomB.computeBoundsTree();
+                                
+                                // Create brushes - Brush extends Mesh, pass geometry
+                                const brushA = new Brush(geomA);
+                                brushA.position.copy(resultMesh.position);
+                                brushA.rotation.copy(resultMesh.rotation);
+                                brushA.scale.copy(resultMesh.scale);
+                                brushA.updateMatrixWorld(true);
+                                
+                                const brushB = new Brush(geomB);
+                                brushB.position.copy(subObj.mesh.position);
+                                brushB.rotation.copy(subObj.mesh.rotation);
+                                brushB.scale.copy(subObj.mesh.scale);
+                                brushB.updateMatrixWorld(true);
+                                
+                                // Perform CSG subtraction
+                                const result = evaluator.evaluate(brushA, brushB, SUBTRACTION);
+                                resultGeometry = result.geometry;
+                                resultMesh = new THREE.Mesh(resultGeometry);
+                                resultMesh.updateMatrixWorld(true);
+                                resolve();
+                            }, 0);
+                        });
+                    }
+                    
+                    // Remove modal
+                    document.body.removeChild(csgModal);
+                    
+                    progressCallback(80, 'Exporting...');
+                    const filename = selectedObject.filename || 'model';
+                    const exported = await exporter.export(resultGeometry, filename, format, progressCallback);
+                    appendLog(`Exported with boolean operations: ${exported}`);
+                } catch (error) {
+                    console.error('Boolean export error:', error);
+                    alert('Boolean export failed: ' + error.message + '\n\nExporting without boolean operations.');
+                    
+                    // Fallback
+                    const geometry = selectedObject.geometry.clone();
+                    geometry.applyMatrix4(selectedObject.mesh.matrix);
+                    const filename = selectedObject.filename || 'model';
+                    const exported = await exporter.export(geometry, filename, format, progressCallback);
+                    appendLog(`Exported: ${exported}`);
+                }
+            } else {
+                // No boolean operations needed
+                const geometry = selectedObject.geometry.clone();
+                geometry.applyMatrix4(selectedObject.mesh.matrix);
+                
+                const filename = selectedObject.filename || 'model';
+                const exported = await exporter.export(geometry, filename, format, progressCallback);
+                appendLog(`Exported: ${exported}`);
+            }
             
         } else {
             // Export entire scene
@@ -1921,39 +2139,203 @@ async function exportModel() {
                 return;
             }
             
-            if (progressDiv) progressDiv.innerText = 'Merging geometries...';
+            const additiveObjects = loadedObjects.filter(obj => obj.mode !== 'subtractive');
+            const subtractiveObjects = loadedObjects.filter(obj => obj.mode === 'subtractive');
             
-            // Merge all object geometries into one
-            const mergedGeometry = new THREE.BufferGeometry();
-            const positions = [];
-            const normals = [];
-            
-            loadedObjects.forEach(obj => {
-                if (!obj.geometry) return;
-                
-                const geo = obj.geometry.clone();
-                geo.applyMatrix4(obj.mesh.matrix);
-                
-                const pos = geo.attributes.position.array;
-                const norm = geo.attributes.normal ? geo.attributes.normal.array : null;
-                
-                for (let i = 0; i < pos.length; i += 3) {
-                    positions.push(pos[i], pos[i + 1], pos[i + 2]);
-                    if (norm) {
-                        normals.push(norm[i], norm[i + 1], norm[i + 2]);
+            if (subtractiveObjects.length > 0 && additiveObjects.length > 0) {
+                // Use CSG boolean operations
+                try {
+                    progressCallback(10, 'Merging additive objects...');
+                    
+                    // Merge all additive geometries first
+                    const mergedPositions = [];
+                    additiveObjects.forEach((obj, idx) => {
+                        const geo = obj.geometry.clone();
+                        geo.applyMatrix4(obj.mesh.matrix);
+                        const pos = geo.attributes.position.array;
+                        for (let i = 0; i < pos.length; i++) {
+                            mergedPositions.push(pos[i]);
+                        }
+                        progressCallback(10 + (idx / additiveObjects.length) * 20, `Merging ${idx + 1}/${additiveObjects.length}...`);
+                    });
+                    
+                    let resultGeometry = new THREE.BufferGeometry();
+                    resultGeometry.setAttribute('position', new THREE.Float32BufferAttribute(mergedPositions, 3));
+                    resultGeometry.computeVertexNormals();
+                    
+                    progressCallback(30, 'Applying subtractions...');
+                    
+                    // Show modal for CSG operation
+                    const csgModal = document.createElement('div');
+                    csgModal.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#2a2a2a;padding:30px;border-radius:8px;z-index:10000;box-shadow:0 4px 20px rgba(0,0,0,0.5);min-width:300px;text-align:center';
+                    csgModal.innerHTML = '<div style="font-size:18px;margin-bottom:15px">Applying Boolean Operations...</div><div id="csg-progress-text" style="color:#4a90e2;font-size:14px">Starting...</div>';
+                    document.body.appendChild(csgModal);
+                    
+                    const updateCSGModal = (msg) => {
+                        const progressText = document.getElementById('csg-progress-text');
+                        if (progressText) progressText.innerText = msg;
+                    };
+                    
+                    // Create mesh for CSG
+                    let resultMesh = new THREE.Mesh(resultGeometry);
+                    resultMesh.updateMatrixWorld(true);
+                    
+                    // Subtract each subtractive object using three-bvh-csg
+                    const { Brush, Evaluator, SUBTRACTION } = window.THREEDCSG;
+                    const evaluator = new Evaluator();
+                    
+                    for (let i = 0; i < subtractiveObjects.length; i++) {
+                        const subObj = subtractiveObjects[i];
+                        const baseProgress = 30 + (i / subtractiveObjects.length) * 50;
+                        
+                        updateCSGModal(`Subtracting object ${i + 1}/${subtractiveObjects.length}...`);
+                        progressCallback(baseProgress, `Subtracting object ${i + 1}/${subtractiveObjects.length}...`);
+                        
+                        // Run async to prevent UI freeze
+                        await new Promise(resolve => {
+                            setTimeout(() => {
+                                // Clone and prepare geometries - ensure they're indexed
+                                const geomA = resultMesh.geometry.clone();
+                                if (!geomA.index) {
+                                    geomA.setIndex(null);
+                                    const posArray = geomA.attributes.position.array;
+                                    const indices = [];
+                                    for (let i = 0; i < posArray.length / 3; i++) {
+                                        indices.push(i);
+                                    }
+                                    geomA.setIndex(indices);
+                                }
+                                if (!geomA.attributes.normal) {
+                                    geomA.computeVertexNormals();
+                                }
+                                if (!geomA.attributes.uv) {
+                                    const uvArray = new Float32Array(geomA.attributes.position.count * 2);
+                                    geomA.setAttribute('uv', new THREE.BufferAttribute(uvArray, 2));
+                                }
+                                
+                                const geomB = subObj.mesh.geometry.clone();
+                                if (!geomB.index) {
+                                    geomB.setIndex(null);
+                                    const posArray = geomB.attributes.position.array;
+                                    const indices = [];
+                                    for (let i = 0; i < posArray.length / 3; i++) {
+                                        indices.push(i);
+                                    }
+                                    geomB.setIndex(indices);
+                                }
+                                if (!geomB.attributes.normal) {
+                                    geomB.computeVertexNormals();
+                                }
+                                if (!geomB.attributes.uv) {
+                                    const uvArray = new Float32Array(geomB.attributes.position.count * 2);
+                                    geomB.setAttribute('uv', new THREE.BufferAttribute(uvArray, 2));
+                                }
+                                
+                                // Build BVH trees for CSG operations
+                                const { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } = window.MeshBVHLib;
+                                THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
+                                THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
+                                THREE.Mesh.prototype.raycast = acceleratedRaycast;
+                                
+                                geomA.computeBoundsTree();
+                                geomB.computeBoundsTree();
+                                
+                                // Create brushes - Brush extends Mesh, pass geometry
+                                const brushA = new Brush(geomA);
+                                brushA.position.copy(resultMesh.position);
+                                brushA.rotation.copy(resultMesh.rotation);
+                                brushA.scale.copy(resultMesh.scale);
+                                brushA.updateMatrixWorld(true);
+                                
+                                const brushB = new Brush(geomB);
+                                brushB.position.copy(subObj.mesh.position);
+                                brushB.rotation.copy(subObj.mesh.rotation);
+                                brushB.scale.copy(subObj.mesh.scale);
+                                brushB.updateMatrixWorld(true);
+                                
+                                // Perform CSG subtraction
+                                const result = evaluator.evaluate(brushA, brushB, SUBTRACTION);
+                                resultGeometry = result.geometry;
+                                resultMesh = new THREE.Mesh(resultGeometry);
+                                resultMesh.updateMatrixWorld(true);
+                                resolve();
+                            }, 0);
+                        });
                     }
+                    
+                    // Remove modal
+                    document.body.removeChild(csgModal);
+                    
+                    progressCallback(80, 'Exporting...');
+                    const exported = await exporter.export(resultGeometry, 'scene_boolean', format, progressCallback);
+                    appendLog(`Exported scene with boolean operations: ${exported}`);
+                    
+                } catch (error) {
+                    console.error('Boolean export error:', error);
+                    alert('Boolean export failed: ' + error.message + '\n\nExporting additive objects only.');
+                    
+                    // Fallback to merging additive only
+                    progressCallback(20, 'Merging geometries...');
+                    const mergedGeometry = new THREE.BufferGeometry();
+                    const positions = [];
+                    const normals = [];
+                    
+                    additiveObjects.forEach((obj, idx) => {
+                        if (!obj.geometry) return;
+                        const geo = obj.geometry.clone();
+                        geo.applyMatrix4(obj.mesh.matrix);
+                        const pos = geo.attributes.position.array;
+                        const norm = geo.attributes.normal ? geo.attributes.normal.array : null;
+                        for (let i = 0; i < pos.length; i += 3) {
+                            positions.push(pos[i], pos[i + 1], pos[i + 2]);
+                            if (norm) normals.push(norm[i], norm[i + 1], norm[i + 2]);
+                        }
+                        progressCallback(20 + (idx / additiveObjects.length) * 60, `Merging ${idx + 1}/${additiveObjects.length}...`);
+                    });
+                    
+                    mergedGeometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+                    if (normals.length > 0) {
+                        mergedGeometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+                    } else {
+                        mergedGeometry.computeVertexNormals();
+                    }
+                    
+                    progressCallback(80, 'Exporting...');
+                    const exported = await exporter.export(mergedGeometry, 'scene', format, progressCallback);
+                    appendLog(`Exported scene (${additiveObjects.length} additive objects): ${exported}`);
                 }
-            });
-            
-            mergedGeometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-            if (normals.length > 0) {
-                mergedGeometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
             } else {
-                mergedGeometry.computeVertexNormals();
+                // No subtractive objects - just merge additive
+                progressCallback(20, 'Merging geometries...');
+                
+                const mergedGeometry = new THREE.BufferGeometry();
+                const positions = [];
+                const normals = [];
+                
+                additiveObjects.forEach((obj, idx) => {
+                    if (!obj.geometry) return;
+                    const geo = obj.geometry.clone();
+                    geo.applyMatrix4(obj.mesh.matrix);
+                    const pos = geo.attributes.position.array;
+                    const norm = geo.attributes.normal ? geo.attributes.normal.array : null;
+                    for (let i = 0; i < pos.length; i += 3) {
+                        positions.push(pos[i], pos[i + 1], pos[i + 2]);
+                        if (norm) normals.push(norm[i], norm[i + 1], norm[i + 2]);
+                    }
+                    progressCallback(20 + (idx / additiveObjects.length) * 60, `Merging ${idx + 1}/${additiveObjects.length}...`);
+                });
+                
+                mergedGeometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+                if (normals.length > 0) {
+                    mergedGeometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+                } else {
+                    mergedGeometry.computeVertexNormals();
+                }
+                
+                progressCallback(80, 'Exporting...');
+                const exported = await exporter.export(mergedGeometry, 'scene', format, progressCallback);
+                appendLog(`Exported scene (${additiveObjects.length} additive objects): ${exported}`);
             }
-            
-            const exported = await exporter.export(mergedGeometry, 'scene', format, progressCallback);
-            appendLog(`Exported scene: ${exported}`);
         }
         
         if (progressDiv) progressDiv.innerText = 'Export complete!';

@@ -176,14 +176,19 @@ class Encoder3DSlicer {
             mergedLayers.push({
                 index: i,
                 z: 0,
+                additiveSegments: [],
+                subtractiveSegments: [],
                 segments: [],
                 perimeters: [],
                 infill: []
             });
         }
         
-        // Merge segments from all objects
+        // Separate additive and subtractive objects
         allLayers.forEach(objLayers => {
+            const isSubtractive = objLayers.object.mode === 'subtractive';
+            console.log(`Object "${objLayers.object.filename}" mode: ${objLayers.object.mode} (isSubtractive: ${isSubtractive})`);
+            
             objLayers.layers.forEach(layer => {
                 // Find matching merged layer by Z height
                 let targetLayer = mergedLayers.find(ml => 
@@ -191,15 +196,43 @@ class Encoder3DSlicer {
                 );
                 
                 if (!targetLayer) {
-                    targetLayer = mergedLayers[layer.index];
-                    if (targetLayer.z === 0) {
-                        targetLayer.z = layer.z;
-                    }
+                    // Create new layer if needed (layer.index might be out of bounds)
+                    targetLayer = {
+                        index: mergedLayers.length,
+                        z: layer.z,
+                        additiveSegments: [],
+                        subtractiveSegments: [],
+                        segments: [],
+                        perimeters: [],
+                        infill: []
+                    };
+                    mergedLayers.push(targetLayer);
                 }
                 
-                // Add segments
-                targetLayer.segments.push(...layer.segments);
+                // Add segments to appropriate array
+                if (isSubtractive) {
+                    targetLayer.subtractiveSegments.push(...layer.segments);
+                } else {
+                    targetLayer.additiveSegments.push(...layer.segments);
+                }
             });
+        });
+        
+        // Process boolean operations for each layer
+        mergedLayers.forEach(layer => {
+            if (layer.subtractiveSegments.length > 0 && layer.additiveSegments.length > 0) {
+                console.log(`Layer ${layer.index}: ${layer.additiveSegments.length} additive segments, ${layer.subtractiveSegments.length} subtractive segments`);
+                // Build subtractive contours
+                const subtractiveContours = this.core.connectSegments(layer.subtractiveSegments);
+                console.log(`Layer ${layer.index}: Built ${subtractiveContours.length} subtractive contours`);
+                
+                // Filter additive segments that aren't inside subtractive contours
+                layer.segments = this.subtractSegments(layer.additiveSegments, subtractiveContours);
+                console.log(`Layer ${layer.index}: After subtraction, ${layer.segments.length} segments remain`);
+            } else {
+                // No subtraction needed, just use additive segments
+                layer.segments = layer.additiveSegments;
+            }
         });
         
         // Remove empty layers and sort by Z
@@ -207,6 +240,67 @@ class Encoder3DSlicer {
             .filter(layer => layer.segments.length > 0)
             .sort((a, b) => a.z - b.z)
             .map((layer, index) => ({ ...layer, index }));
+    }
+    
+    /**
+     * Subtract segments that are inside subtractive contours
+     */
+    subtractSegments(additiveSegments, subtractiveContours) {
+        if (subtractiveContours.length === 0) return additiveSegments;
+        
+        const resultSegments = [];
+        let removedCount = 0;
+        
+        additiveSegments.forEach((seg, idx) => {
+            if (!seg.start || !seg.end) {
+                console.error(`Segment ${idx} missing start/end:`, seg);
+                resultSegments.push(seg);
+                return;
+            }
+            
+            const midX = (seg.start.x + seg.end.x) / 2;
+            const midY = (seg.start.y + seg.end.y) / 2;
+            
+            if (isNaN(midX) || isNaN(midY)) {
+                console.error(`Invalid midpoint for segment ${idx}:`, midX, midY, seg);
+                resultSegments.push(seg);
+                return;
+            }
+            
+            // Check if segment midpoint is inside any subtractive contour
+            let inside = false;
+            for (const contour of subtractiveContours) {
+                if (this.isPointInPolygon(midX, midY, contour)) {
+                    inside = true;
+                    removedCount++;
+                    break;
+                }
+            }
+            
+            // Only keep segment if it's NOT inside a subtractive contour
+            if (!inside) {
+                resultSegments.push(seg);
+            }
+        });
+        
+        console.log(`  Subtraction: ${additiveSegments.length} input → ${removedCount} removed → ${resultSegments.length} remaining`);
+        return resultSegments;
+    }
+    
+    /**
+     * Point-in-polygon test using ray casting algorithm
+     */
+    isPointInPolygon(x, y, polygon) {
+        let inside = false;
+        for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+            const xi = polygon[i].x, yi = polygon[i].y;
+            const xj = polygon[j].x, yj = polygon[j].y;
+            
+            const intersect = ((yi > y) !== (yj > y))
+                && (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+            if (intersect) inside = !inside;
+        }
+        return inside;
     }
 
     /**
