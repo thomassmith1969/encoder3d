@@ -594,6 +594,34 @@ function updateSizeDisplay() {
     if (sizeDisplay) {
         sizeDisplay.innerText = `${actualSize.x} × ${actualSize.y} × ${actualSize.z} mm`;
     }
+    
+    // Update position display
+    const posDisplay = document.getElementById('obj-position-display');
+    if (posDisplay && selectedObject.transform.position) {
+        const pos = selectedObject.transform.position;
+        posDisplay.innerText = `${pos.x.toFixed(1)}, ${pos.y.toFixed(1)}, ${pos.z.toFixed(1)} mm`;
+    }
+    
+    // Update bounding box display
+    const boundsDisplay = document.getElementById('obj-bounds-display');
+    if (boundsDisplay && selectedObject.mesh) {
+        // Compute world bounding box
+        selectedObject.mesh.geometry.computeBoundingBox();
+        const bbox = selectedObject.mesh.geometry.boundingBox.clone();
+        
+        // Apply current transform to get actual bounds in world space
+        const pos = selectedObject.transform.position;
+        const scl = selectedObject.transform.scale;
+        
+        const minX = (bbox.min.x * scl.x + pos.x).toFixed(1);
+        const minY = (bbox.min.y * scl.y + pos.y).toFixed(1);
+        const minZ = (bbox.min.z * scl.z + pos.z).toFixed(1);
+        const maxX = (bbox.max.x * scl.x + pos.x).toFixed(1);
+        const maxY = (bbox.max.y * scl.y + pos.y).toFixed(1);
+        const maxZ = (bbox.max.z * scl.z + pos.z).toFixed(1);
+        
+        boundsDisplay.innerText = `X:${minX}→${maxX}, Y:${minY}→${maxY}, Z:${minZ}→${maxZ}`;
+    }
 }
 
 function resetTransform() {
@@ -658,69 +686,6 @@ function addNewModel() {
     if (fileInput) {
         fileInput.click();
     }
-}
-
-function toggleObjectPanel() {
-    const panel = document.getElementById('object-panel');
-    if (panel) {
-        panel.classList.toggle('collapsed');
-    }
-}
-
-// Make object panel draggable
-function initDraggablePanel() {
-    const panel = document.getElementById('object-panel');
-    const header = panel.querySelector('.panel-header');
-    
-    let isDragging = false;
-    let currentX;
-    let currentY;
-    let initialX;
-    let initialY;
-    
-    header.addEventListener('mousedown', (e) => {
-        // Don't drag if clicking the toggle icon
-        if (e.target.id === 'panel-toggle-icon' || e.target.closest('#panel-toggle-icon')) {
-            return;
-        }
-        
-        isDragging = true;
-        initialX = e.clientX - panel.offsetLeft;
-        initialY = e.clientY - panel.offsetTop;
-        
-        header.style.cursor = 'grabbing';
-    });
-    
-    document.addEventListener('mousemove', (e) => {
-        if (isDragging) {
-            e.preventDefault();
-            currentX = e.clientX - initialX;
-            currentY = e.clientY - initialY;
-            
-            // Keep panel within viewport
-            const maxX = window.innerWidth - panel.offsetWidth;
-            const maxY = window.innerHeight - panel.offsetHeight;
-            
-            currentX = Math.max(0, Math.min(currentX, maxX));
-            currentY = Math.max(0, Math.min(currentY, maxY));
-            
-            panel.style.left = currentX + 'px';
-            panel.style.top = currentY + 'px';
-            panel.style.right = 'auto';
-        }
-    });
-    
-    document.addEventListener('mouseup', () => {
-        isDragging = false;
-        header.style.cursor = 'move';
-    });
-}
-
-// Call after DOM loaded
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initDraggablePanel);
-} else {
-    initDraggablePanel();
 }
 
 // View toggle functions

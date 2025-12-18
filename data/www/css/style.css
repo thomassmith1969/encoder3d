@@ -55,58 +55,6 @@ body {
     user-select: none;
 }
 
-#object-panel {
-    position: fixed;
-    top: 60px;
-    right: 10px;
-    width: 300px;
-    max-height: 600px;
-    background: rgba(37, 37, 38, 0.98);
-    border: 1px solid #555;
-    border-radius: 6px;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
-    z-index: 1000;
-    overflow: hidden;
-    transition: max-height 0.3s ease;
-}
-
-#object-panel.collapsed {
-    max-height: 42px;
-}
-
-#object-panel.collapsed #object-panel-content {
-    display: none;
-}
-
-.panel-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 10px 12px;
-    background: rgba(45, 45, 48, 0.95);
-    user-select: none;
-    cursor: move;
-    border-bottom: 1px solid #444;
-}
-
-#panel-toggle-icon {
-    font-size: 0.8em;
-    transition: transform 0.3s ease;
-    cursor: pointer;
-}
-
-#object-panel.collapsed #panel-toggle-icon {
-    transform: rotate(-90deg);
-}
-
-#object-panel-content {
-    padding: 0 12px 12px 12px;
-    max-height: 550px;
-    overflow-y: auto;
-}
-    overflow-y: auto;
-}
-
 #object-list {
     max-height: 250px;
     overflow-y: auto;
