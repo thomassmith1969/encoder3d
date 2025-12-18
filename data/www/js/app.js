@@ -1095,6 +1095,173 @@ function calculateVolume(geometry) {
 // --- Slicing Functions ---
 let slicingCancelled = false;
 
+// Build a merged/export-ready geometry (with booleans) using the exact export logic
+async function buildExportedGeometryForSlicing(progressCallback) {
+    if (loadedObjects.length === 0) {
+        throw new Error('No objects to slice');
+    }
+
+    // Always sync transforms before sampling geometry
+    loadedObjects.forEach(obj => obj.mesh.updateMatrixWorld(true));
+
+    const additiveObjects = loadedObjects.filter(obj => obj.mode !== 'subtractive');
+    const subtractiveObjects = loadedObjects.filter(obj => obj.mode === 'subtractive');
+
+    const update = (p, msg) => {
+        if (progressCallback) progressCallback(p, msg);
+    };
+
+    const ensureIndexed = (geo) => {
+        if (!geo.index) {
+            const idxArr = Array.from({ length: geo.attributes.position.count }, (_, k) => k);
+            geo.setIndex(idxArr);
+        }
+    };
+
+    const ensureUVs = (geo) => {
+        if (!geo.attributes.uv) {
+            const uvArray = new Float32Array(geo.attributes.position.count * 2);
+            geo.setAttribute('uv', new THREE.BufferAttribute(uvArray, 2));
+        }
+    };
+
+    update(5, 'Merging additive objects (export pipeline)...');
+    console.log('[slice] additive objects:', additiveObjects.length, 'subtractive objects:', subtractiveObjects.length);
+    const mergedPositions = [];
+
+    additiveObjects.forEach((obj, idx) => {
+        const geo = obj.geometry.clone();
+        geo.applyMatrix4(obj.mesh.matrixWorld);
+        const pos = geo.attributes.position.array;
+        for (let i = 0; i < pos.length; i++) mergedPositions.push(pos[i]);
+        update(5 + (idx / Math.max(1, additiveObjects.length)) * 20, `Merged ${idx + 1}/${additiveObjects.length}`);
+    });
+
+    let resultGeometry = new THREE.BufferGeometry();
+    resultGeometry.setAttribute('position', new THREE.Float32BufferAttribute(mergedPositions, 3));
+    ensureIndexed(resultGeometry);
+    ensureUVs(resultGeometry);
+    resultGeometry.computeVertexNormals();
+    resultGeometry.computeBoundingBox();
+    console.log('[slice] merged additive vertex count:', resultGeometry.attributes.position.count, 'index:', !!resultGeometry.index);
+
+    // If no subtractive objects, return single processed object
+    if (subtractiveObjects.length === 0) {
+        update(40, 'No subtractions; geometry ready');
+        return [{
+            filename: 'scene_merged.stl',
+            geometry: resultGeometry,
+            mesh: new THREE.Mesh(resultGeometry),
+            mode: 'additive',
+            transform: {
+                position: { x: 0, y: 0, z: 0 },
+                rotation: { x: 0, y: 0, z: 0 },
+                scale: 1
+            }
+        }];
+    }
+
+    update(40, 'Applying boolean subtractions (export pipeline)...');
+    let resultMesh = new THREE.Mesh(resultGeometry);
+    resultMesh.updateMatrixWorld(true);
+
+    const { Brush, Evaluator, SUBTRACTION } = window.THREEDCSG;
+    const evaluator = new Evaluator();
+
+    for (let i = 0; i < subtractiveObjects.length; i++) {
+        const subObj = subtractiveObjects[i];
+        const baseProgress = 40 + (i / subtractiveObjects.length) * 50;
+        update(baseProgress, `Subtracting object ${i + 1}/${subtractiveObjects.length}...`);
+
+        await new Promise(resolve => {
+            setTimeout(() => {
+                // Clone and prepare geometries like export
+                let geomA = resultMesh.geometry.clone();
+                if (geomA.index) geomA = geomA.toNonIndexed();
+                if (!geomA.attributes.normal) geomA.computeVertexNormals();
+                ensureUVs(geomA);
+                geomA.computeBoundingBox();
+
+                let geomB = subObj.mesh.geometry.clone();
+                geomB.applyMatrix4(subObj.mesh.matrixWorld);
+                if (geomB.index) geomB = geomB.toNonIndexed();
+                if (!geomB.attributes.normal) geomB.computeVertexNormals();
+                ensureUVs(geomB);
+                geomB.computeBoundingBox();
+
+                console.log('[slice] CSG step', i + 1, '/', subtractiveObjects.length);
+                console.log('        geomA verts:', geomA.attributes.position.count, 'bbox min:', geomA.boundingBox.min, 'max:', geomA.boundingBox.max);
+                console.log('        geomB verts:', geomB.attributes.position.count, 'bbox min:', geomB.boundingBox.min, 'max:', geomB.boundingBox.max);
+
+                const { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } = window.MeshBVHLib;
+                THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
+                THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
+                THREE.Mesh.prototype.raycast = acceleratedRaycast;
+
+                geomA.computeBoundsTree();
+                geomB.computeBoundsTree();
+
+                const brushA = new Brush(geomA);
+                brushA.position.set(0,0,0);
+                brushA.rotation.set(0,0,0);
+                brushA.scale.set(1,1,1);
+                brushA.updateMatrixWorld(true);
+
+                const brushB = new Brush(geomB);
+                brushB.position.set(0,0,0);
+                brushB.rotation.set(0,0,0);
+                brushB.scale.set(1,1,1);
+                brushB.updateMatrixWorld(true);
+
+                console.log('[slice] Evaluating CSG SUBTRACTION operation...');
+                console.log('        SUBTRACTION constant:', SUBTRACTION);
+                const result = evaluator.evaluate(brushA, brushB, SUBTRACTION);
+                console.log('[slice] CSG returned geometry with', result.geometry.attributes.position.count, 'vertices');
+                
+                // Sample first 10 vertices to check if any are outside original bbox
+                const resultPos = result.geometry.attributes.position.array;
+                console.log('[slice] Sample result vertices (first 10):');
+                for (let si = 0; si < Math.min(10, resultPos.length / 3); si++) {
+                    const vx = resultPos[si * 3];
+                    const vy = resultPos[si * 3 + 1];
+                    const vz = resultPos[si * 3 + 2];
+                    console.log(`        v${si}: [${vx.toFixed(2)}, ${vy.toFixed(2)}, ${vz.toFixed(2)}]`);
+                }
+                let rawGeometry = result.geometry;
+                if (rawGeometry.index) rawGeometry = rawGeometry.toNonIndexed();
+                
+                // Force clean geometry rebuild to avoid stale bbox
+                const positions = rawGeometry.attributes.position.array;
+                resultGeometry = new THREE.BufferGeometry();
+                resultGeometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+                ensureUVs(resultGeometry);
+                resultGeometry.computeVertexNormals();
+                resultGeometry.computeBoundingBox();
+                
+                resultMesh = new THREE.Mesh(resultGeometry);
+                resultMesh.updateMatrixWorld(true);
+                console.log('[slice] result verts after subtraction:', resultGeometry.attributes.position.count, 'bbox min:', resultGeometry.boundingBox.min, 'max:', resultGeometry.boundingBox.max);
+                resolve();
+            }, 0);
+        });
+    }
+
+    resultGeometry.computeVertexNormals();
+    update(95, 'Boolean operations complete');
+
+    return [{
+        filename: 'scene_boolean.stl',
+        geometry: resultGeometry,
+        mesh: resultMesh,
+        mode: 'additive',
+        transform: {
+            position: { x: 0, y: 0, z: 0 },
+            rotation: { x: 0, y: 0, z: 0 },
+            scale: 1
+        }
+    }];
+}
+
 async function sliceModel() {
     if (loadedObjects.length === 0) {
         alert('Please load at least one model first');
@@ -1136,19 +1303,45 @@ async function sliceModel() {
     };
     
     try {
-        // Use setTimeout to allow UI updates
         await new Promise(resolve => setTimeout(resolve, 50));
         
-        // Use real slicer with progress callback
+        // STEP 1: Use exportModel logic to generate processed geometry with booleans
+        progressDiv.innerText = 'Generating export geometry (with booleans)...';
+        if (progressBar) progressBar.style.width = '10%';
+        
+        const exportedGeometry = await generateExportGeometry((p, msg) => {
+            progressDiv.innerText = `Export: ${msg} (${Math.round(p)}%)`;
+            if (progressBar) progressBar.style.width = `${10 + p * 0.4}%`;
+        });
+        
+        if (slicingCancelled) throw new Error('Slicing cancelled by user');
+        
+        // STEP 2: Wrap exported geometry as processable object for slicer
+        const processedObjects = [{
+            filename: 'exported_boolean.stl',
+            geometry: exportedGeometry,
+            mesh: new THREE.Mesh(exportedGeometry),
+            mode: 'additive',
+            transform: {
+                position: { x: 0, y: 0, z: 0 },
+                rotation: { x: 0, y: 0, z: 0 },
+                scale: 1
+            }
+        }];
+        
+        progressDiv.innerText = 'Slicing exported geometry...';
+        if (progressBar) progressBar.style.width = '50%';
+
+        // STEP 3: Use real slicer with progress callback
         const result = await encoder3DSlicer.slice(
-            loadedObjects,
+            processedObjects,
             settings,
             (progress, status) => {
                 if (slicingCancelled) {
                     throw new Error('Slicing cancelled by user');
                 }
                 progressDiv.innerText = `${status} (${Math.round(progress)}%)`;
-                if (progressBar) progressBar.style.width = `${progress}%`;
+                if (progressBar) progressBar.style.width = `${50 + progress * 0.5}%`;
             }
         );
         
