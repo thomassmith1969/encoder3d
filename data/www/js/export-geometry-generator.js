@@ -128,5 +128,11 @@ async function generateExportGeometry(progressCallback = null) {
     }
     
     update(100, 'Boolean operations complete');
+    
+    // Apply 90-degree X rotation for slicer coordinate system
+    const rotationMatrix = new THREE.Matrix4().makeRotationX(Math.PI / 2);
+    resultGeometry.applyMatrix4(rotationMatrix);
+    resultGeometry.computeVertexNormals();
+    
     return resultGeometry;
 }
