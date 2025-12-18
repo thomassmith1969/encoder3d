@@ -33,7 +33,9 @@
             <div id="object-panel-content">
                 <div style="margin: 10px 0;">
                     <input type="file" id="stl-upload-multi" accept=".stl,.obj,.ply,.svg,.dxf,.3mf" onchange="loadModel()" style="display: none;">
-                    <button onclick="addNewModel()" style="width: 100%; padding: 6px;">+ Add Model</button>
+                    <button onclick="addNewModel()" style="width: 100%; padding: 6px; margin-bottom: 4px;">+ Add Model</button>
+                    <button onclick="showPrimitiveMenu()" style="width: 100%; padding: 6px; margin-bottom: 4px;">+ Add Primitive</button>
+                    <button onclick="showTemplateMenu()" style="width: 100%; padding: 6px;">+ Add Template</button>
                 </div>
                 <div id="object-list"></div>
                 <div id="object-transform" style="display: none;">
@@ -49,9 +51,37 @@
                         <label>Rot Y: <input type="number" id="obj-rot-y" step="15" value="0" onchange="applyTransform()"></label>
                         <label>Rot Z: <input type="number" id="obj-rot-z" step="15" value="0" onchange="applyTransform()"></label>
                     </div>
+                    <div style="margin: 8px 0;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                            <strong style="font-size: 0.9em;">Scale</strong>
+                            <button onclick="resetScale()" style="padding: 2px 6px; font-size: 0.8em;">Reset</button>
+                        </div>
+                        <div style="display: grid; grid-template-columns: auto 1fr 1fr; gap: 4px; align-items: center; font-size: 0.85em;">
+                            <span></span>
+                            <span style="text-align: center; color: #999;">%</span>
+                            <span style="text-align: center; color: #999;">mm</span>
+                            
+                            <span>X:</span>
+                            <input type="number" id="obj-scale-x-pct" step="10" value="100" onchange="updateScaleFromPercent('x')" style="width: 100%; padding: 2px;">
+                            <input type="number" id="obj-scale-x-mm" step="1" value="0" onchange="updateScaleFromMM('x')" style="width: 100%; padding: 2px;">
+                            
+                            <span>Y:</span>
+                            <input type="number" id="obj-scale-y-pct" step="10" value="100" onchange="updateScaleFromPercent('y')" style="width: 100%; padding: 2px;">
+                            <input type="number" id="obj-scale-y-mm" step="1" value="0" onchange="updateScaleFromMM('y')" style="width: 100%; padding: 2px;">
+                            
+                            <span>Z:</span>
+                            <input type="number" id="obj-scale-z-pct" step="10" value="100" onchange="updateScaleFromPercent('z')" style="width: 100%; padding: 2px;">
+                            <input type="number" id="obj-scale-z-mm" step="1" value="0" onchange="updateScaleFromMM('z')" style="width: 100%; padding: 2px;">
+                        </div>
+                        <div style="margin-top: 4px;">
+                            <label style="font-size: 0.85em;">
+                                <input type="checkbox" id="uniform-scale" onchange="toggleUniformScale()" checked>
+                                Uniform Scale
+                            </label>
+                        </div>
+                    </div>
                     <div class="transform-row">
-                        <label>Scale: <input type="number" id="obj-scale" step="10" value="100" onchange="applyTransform()">%</label>
-                        <button onclick="resetTransform()" style="padding: 4px 8px;">Reset</button>
+                        <button onclick="resetTransform()" style="padding: 4px 8px; width: 100%;">Reset All</button>
                     </div>
                     <div class="transform-row">
                         <label>Mode: 
@@ -255,6 +285,72 @@
             </div>
         </div>
     </div>
+    
+    <!-- Primitive Selection Modal -->
+    <div id="primitive-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); z-index:10000; align-items:center; justify-content:center;">
+        <div style="background:#2a2a2a; padding:20px; border-radius:8px; max-width:400px; width:90%;">
+            <h3 style="margin-top:0;">Add Primitive</h3>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin:15px 0;">
+                <button onclick="addPrimitive('cube')" style="padding:12px;">📦 Cube</button>
+                <button onclick="addPrimitive('sphere')" style="padding:12px;">⚫ Sphere</button>
+                <button onclick="addPrimitive('cylinder')" style="padding:12px;">🛢️ Cylinder</button>
+                <button onclick="addPrimitive('cone')" style="padding:12px;">🔺 Cone</button>
+                <button onclick="addPrimitive('torus')" style="padding:12px;">🍩 Torus</button>
+                <button onclick="addPrimitive('plane')" style="padding:12px;">▭ Plane</button>
+            </div>
+            <button onclick="closePrimitiveMenu()" style="width:100%; padding:8px; margin-top:10px;">Cancel</button>
+        </div>
+    </div>
+    
+    <!-- Template Selection Modal -->
+    <div id="template-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); z-index:10000; align-items:center; justify-content:center;">
+        <div style="background:#2a2a2a; padding:20px; border-radius:8px; max-width:400px; width:90%;">
+            <h3 style="margin-top:0;">Add Template</h3>
+            <div style="display:grid; grid-template-columns:1fr; gap:10px; margin:15px 0;">
+                <button onclick="showBoxBuilder()" style="padding:12px;">📦 Box Builder</button>
+                <button onclick="alert('Coming soon!')" style="padding:12px;">🔩 Threaded Hole</button>
+                <button onclick="alert('Coming soon!')" style="padding:12px;">🔲 Grid/Lattice</button>
+            </div>
+            <button onclick="closeTemplateMenu()" style="width:100%; padding:8px; margin-top:10px;">Cancel</button>
+        </div>
+    </div>
+    
+    <!-- Box Builder Modal -->
+    <div id="box-builder-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); z-index:10001; align-items:center; justify-content:center;">
+        <div style="background:#2a2a2a; padding:20px; border-radius:8px; max-width:450px; width:90%;">
+            <h3 style="margin-top:0;">Box Builder</h3>
+            <div style="display:grid; grid-template-columns:auto 1fr auto; gap:8px; align-items:center; margin:15px 0;">
+                <label>Width (X):</label>
+                <input type="number" id="box-width" value="50" min="1" style="padding:4px;">
+                <span>mm</span>
+                
+                <label>Depth (Y):</label>
+                <input type="number" id="box-depth" value="50" min="1" style="padding:4px;">
+                <span>mm</span>
+                
+                <label>Height (Z):</label>
+                <input type="number" id="box-height" value="30" min="1" style="padding:4px;">
+                <span>mm</span>
+                
+                <label>Wall Thickness:</label>
+                <input type="number" id="box-wall" value="2" min="0.4" step="0.2" style="padding:4px;">
+                <span>mm</span>
+                
+                <label>Add Lid:</label>
+                <input type="checkbox" id="box-lid" checked style="justify-self:start;">
+                <span></span>
+                
+                <label>Lid Gap:</label>
+                <input type="number" id="box-lid-gap" value="0.2" min="0" step="0.1" style="padding:4px;">
+                <span>mm</span>
+            </div>
+            <div style="display:flex; gap:10px; margin-top:15px;">
+                <button onclick="createBox()" style="flex:1; padding:8px;">Create</button>
+                <button onclick="closeBoxBuilder()" style="flex:1; padding:8px;">Cancel</button>
+            </div>
+        </div>
+    </div>
+    
     <script src="js/gcode-to-stl-simple.js"></script>
     <script src="js/app.js"></script>
 </body>

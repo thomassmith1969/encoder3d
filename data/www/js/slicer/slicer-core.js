@@ -132,10 +132,18 @@ class SlicerCore {
         ));
         matrix.multiply(rotMatrix);
         
-        // Scale
+        // Scale - handle both old format (number) and new format (object with x,y,z)
         const scale = transform.scale || 1;
+        let scaleX, scaleY, scaleZ;
+        if (typeof scale === 'number') {
+            scaleX = scaleY = scaleZ = scale;
+        } else {
+            scaleX = scale.x || 1;
+            scaleY = scale.y || 1;
+            scaleZ = scale.z || 1;
+        }
         const scaleMatrix = new THREE.Matrix4();
-        scaleMatrix.makeScale(scale, scale, scale);
+        scaleMatrix.makeScale(scaleX, scaleY, scaleZ);
         matrix.multiply(scaleMatrix);
         
         return matrix;

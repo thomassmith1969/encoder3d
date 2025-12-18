@@ -395,7 +395,7 @@ function addObjectToScene(mesh, filename, geometry) {
         transform: {
             position: { x: 0, y: 0, z: 0 },
             rotation: { x: 0, y: 0, z: 0 },
-            scale: 1
+            scale: { x: 1, y: 1, z: 1 }
         }
     };
     loadedObjects.push(obj);
@@ -437,7 +437,23 @@ function selectObject(obj) {
     document.getElementById('obj-rot-x').value = Math.round(obj.transform.rotation.x * 180 / Math.PI);
     document.getElementById('obj-rot-y').value = Math.round(obj.transform.rotation.y * 180 / Math.PI);
     document.getElementById('obj-rot-z').value = Math.round(obj.transform.rotation.z * 180 / Math.PI);
-    document.getElementById('obj-scale').value = obj.transform.scale * 100;
+    
+    // Update scale inputs - handle both old format (number) and new format (object)
+    const scale = obj.transform.scale;
+    if (typeof scale === 'number') {
+        // Convert old format to new format
+        obj.transform.scale = { x: scale, y: scale, z: scale };
+    }
+    document.getElementById('obj-scale-x-pct').value = (obj.transform.scale.x * 100).toFixed(1);
+    document.getElementById('obj-scale-y-pct').value = (obj.transform.scale.y * 100).toFixed(1);
+    document.getElementById('obj-scale-z-pct').value = (obj.transform.scale.z * 100).toFixed(1);
+    
+    if (obj.originalSize) {
+        document.getElementById('obj-scale-x-mm').value = (obj.originalSize.x * obj.transform.scale.x).toFixed(2);
+        document.getElementById('obj-scale-y-mm').value = (obj.originalSize.y * obj.transform.scale.y).toFixed(2);
+        document.getElementById('obj-scale-z-mm').value = (obj.originalSize.z * obj.transform.scale.z).toFixed(2);
+    }
+    
     document.getElementById('obj-mode').value = obj.mode || 'additive';
     
     // Update mesh material color based on mode
@@ -479,18 +495,90 @@ function applyTransform() {
     const rotY = (parseFloat(document.getElementById('obj-rot-y').value) || 0) * Math.PI / 180;
     const rotZ = (parseFloat(document.getElementById('obj-rot-z').value) || 0) * Math.PI / 180;
     
-    const scale = (parseFloat(document.getElementById('obj-scale').value) || 100) / 100;
+    const scaleX = (parseFloat(document.getElementById('obj-scale-x-pct').value) || 100) / 100;
+    const scaleY = (parseFloat(document.getElementById('obj-scale-y-pct').value) || 100) / 100;
+    const scaleZ = (parseFloat(document.getElementById('obj-scale-z-pct').value) || 100) / 100;
     
     selectedObject.transform.position = { x: posX, y: posY, z: posZ };
     selectedObject.transform.rotation = { x: rotX, y: rotY, z: rotZ };
-    selectedObject.transform.scale = scale;
+    selectedObject.transform.scale = { x: scaleX, y: scaleY, z: scaleZ };
     
     selectedObject.mesh.position.set(posX, posZ, posY);
     selectedObject.mesh.rotation.set(rotX, rotY, rotZ);
-    selectedObject.mesh.scale.set(scale, scale, scale);
+    selectedObject.mesh.scale.set(scaleX, scaleZ, scaleY); // Y and Z swapped for viewer coords
     
     // Update size display
     updateSizeDisplay();
+}
+
+function updateScaleFromPercent(axis) {
+    if (!selectedObject || !selectedObject.originalSize) return;
+    
+    const pctInput = document.getElementById(`obj-scale-${axis}-pct`);
+    const mmInput = document.getElementById(`obj-scale-${axis}-mm`);
+    const pct = parseFloat(pctInput.value) || 100;
+    const originalDim = selectedObject.originalSize[axis];
+    const newMM = (originalDim * pct / 100).toFixed(2);
+    mmInput.value = newMM;
+    
+    // If uniform scale is enabled, update other axes
+    if (document.getElementById('uniform-scale').checked) {
+        ['x', 'y', 'z'].forEach(a => {
+            if (a !== axis) {
+                document.getElementById(`obj-scale-${a}-pct`).value = pct;
+                const origDim = selectedObject.originalSize[a];
+                document.getElementById(`obj-scale-${a}-mm`).value = (origDim * pct / 100).toFixed(2);
+            }
+        });
+    }
+    
+    applyTransform();
+}
+
+function updateScaleFromMM(axis) {
+    if (!selectedObject || !selectedObject.originalSize) return;
+    
+    const pctInput = document.getElementById(`obj-scale-${axis}-pct`);
+    const mmInput = document.getElementById(`obj-scale-${axis}-mm`);
+    const mm = parseFloat(mmInput.value) || 0;
+    const originalDim = selectedObject.originalSize[axis];
+    
+    if (originalDim > 0) {
+        const pct = ((mm / originalDim) * 100).toFixed(1);
+        pctInput.value = pct;
+        
+        // If uniform scale is enabled, update other axes
+        if (document.getElementById('uniform-scale').checked) {
+            ['x', 'y', 'z'].forEach(a => {
+                if (a !== axis) {
+                    document.getElementById(`obj-scale-${a}-pct`).value = pct;
+                    const origDim = selectedObject.originalSize[a];
+                    document.getElementById(`obj-scale-${a}-mm`).value = (origDim * pct / 100).toFixed(2);
+                }
+            });
+        }
+    }
+    
+    applyTransform();
+}
+
+function toggleUniformScale() {
+    // When enabling uniform scale, sync all axes to X
+    if (document.getElementById('uniform-scale').checked && selectedObject) {
+        const xPct = parseFloat(document.getElementById('obj-scale-x-pct').value) || 100;
+        updateScaleFromPercent('x');
+    }
+}
+
+function resetScale() {
+    if (!selectedObject) return;
+    ['x', 'y', 'z'].forEach(axis => {
+        document.getElementById(`obj-scale-${axis}-pct`).value = 100;
+        if (selectedObject.originalSize) {
+            document.getElementById(`obj-scale-${axis}-mm`).value = selectedObject.originalSize[axis].toFixed(2);
+        }
+    });
+    applyTransform();
 }
 
 function updateSizeDisplay() {
@@ -498,9 +586,9 @@ function updateSizeDisplay() {
     const scale = selectedObject.transform.scale;
     const size = selectedObject.originalSize;
     const actualSize = {
-        x: (size.x * scale).toFixed(2),
-        y: (size.y * scale).toFixed(2),
-        z: (size.z * scale).toFixed(2)
+        x: (size.x * scale.x).toFixed(2),
+        y: (size.y * scale.y).toFixed(2),
+        z: (size.z * scale.z).toFixed(2)
     };
     const sizeDisplay = document.getElementById('obj-actual-size');
     if (sizeDisplay) {
@@ -516,7 +604,7 @@ function resetTransform() {
     document.getElementById('obj-rot-x').value = 0;
     document.getElementById('obj-rot-y').value = 0;
     document.getElementById('obj-rot-z').value = 0;
-    document.getElementById('obj-scale').value = 100;
+    resetScale();
     applyTransform();
 }
 
@@ -1257,7 +1345,7 @@ async function buildExportedGeometryForSlicing(progressCallback) {
         transform: {
             position: { x: 0, y: 0, z: 0 },
             rotation: { x: 0, y: 0, z: 0 },
-            scale: 1
+            scale: { x: 1, y: 1, z: 1 }
         }
     }];
 }
@@ -1334,7 +1422,7 @@ async function sliceModel() {
             transform: {
                 position: { x: 0, y: 0, z: 0 },
                 rotation: { x: 0, y: 0, z: 0 },
-                scale: 1
+                scale: { x: 1, y: 1, z: 1 }
             }
         }];
         
@@ -2559,4 +2647,180 @@ async function exportModel() {
         if (progressDiv) progressDiv.innerText = 'Export failed';
         if (progressBar) progressBar.style.width = '0%';
     }
+}
+
+// ============================================================================
+// PRIMITIVE CREATION
+// ============================================================================
+
+function showPrimitiveMenu() {
+    const modal = document.getElementById('primitive-modal');
+    if (modal) {
+        modal.style.display = 'flex';
+    }
+}
+
+function closePrimitiveMenu() {
+    const modal = document.getElementById('primitive-modal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+}
+
+function addPrimitive(type) {
+    closePrimitiveMenu();
+    
+    let geometry;
+    let filename;
+    
+    switch(type) {
+        case 'cube':
+            geometry = new THREE.BoxGeometry(20, 20, 20);
+            filename = 'Cube_20mm';
+            break;
+        case 'sphere':
+            geometry = new THREE.SphereGeometry(10, 32, 32);
+            filename = 'Sphere_20mm';
+            break;
+        case 'cylinder':
+            geometry = new THREE.CylinderGeometry(10, 10, 20, 32);
+            filename = 'Cylinder_20x20mm';
+            break;
+        case 'cone':
+            geometry = new THREE.ConeGeometry(10, 20, 32);
+            filename = 'Cone_20x20mm';
+            break;
+        case 'torus':
+            geometry = new THREE.TorusGeometry(10, 3, 16, 32);
+            filename = 'Torus_20mm';
+            break;
+        case 'plane':
+            geometry = new THREE.PlaneGeometry(20, 20);
+            filename = 'Plane_20mm';
+            break;
+        default:
+            alert('Unknown primitive type');
+            return;
+    }
+    
+    // Center geometry at origin
+    geometry.computeBoundingBox();
+    const bbox = geometry.boundingBox;
+    const offsetX = -(bbox.max.x + bbox.min.x) / 2;
+    const offsetY = -(bbox.max.y + bbox.min.y) / 2;
+    const offsetZ = -bbox.min.z;  // Place bottom at Z=0
+    geometry.translate(offsetX, offsetY, offsetZ);
+    
+    // Create mesh
+    const material = new THREE.MeshPhongMaterial({ color: 0x4a90e2, side: THREE.DoubleSide });
+    const mesh = new THREE.Mesh(geometry, material);
+    
+    // Position mesh so bottom is at grid (Y-up viewer coords)
+    geometry.computeBoundingBox();
+    const size = new THREE.Vector3();
+    geometry.boundingBox.getSize(size);
+    const zOffset = size.y / 2;
+    mesh.position.set(0, zOffset, 0);
+    
+    // Add to scene
+    const obj = addObjectToScene(mesh, filename, geometry);
+    selectObject(obj);
+    
+    appendLog(`Added primitive: ${filename}`);
+}
+
+// ============================================================================
+// TEMPLATE SYSTEM
+// ============================================================================
+
+function showTemplateMenu() {
+    const modal = document.getElementById('template-modal');
+    if (modal) {
+        modal.style.display = 'flex';
+    }
+}
+
+function closeTemplateMenu() {
+    const modal = document.getElementById('template-modal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+}
+
+function showBoxBuilder() {
+    closeTemplateMenu();
+    const modal = document.getElementById('box-builder-modal');
+    if (modal) {
+        modal.style.display = 'flex';
+    }
+}
+
+function closeBoxBuilder() {
+    const modal = document.getElementById('box-builder-modal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+}
+
+function createBox() {
+    const width = parseFloat(document.getElementById('box-width').value) || 50;
+    const depth = parseFloat(document.getElementById('box-depth').value) || 50;
+    const height = parseFloat(document.getElementById('box-height').value) || 30;
+    const wall = parseFloat(document.getElementById('box-wall').value) || 2;
+    const addLid = document.getElementById('box-lid').checked;
+    const lidGap = parseFloat(document.getElementById('box-lid-gap').value) || 0.2;
+    
+    closeBoxBuilder();
+    
+    // Create outer box
+    const outerGeometry = new THREE.BoxGeometry(width, depth, height);
+    outerGeometry.translate(0, 0, height / 2);
+    
+    const outerMaterial = new THREE.MeshPhongMaterial({ color: 0x4a90e2, side: THREE.DoubleSide });
+    const outerMesh = new THREE.Mesh(outerGeometry, outerMaterial);
+    
+    const outerObj = addObjectToScene(outerMesh, `Box_${width}x${depth}x${height}mm`, outerGeometry);
+    outerObj.mode = 'additive';
+    
+    // Create inner cavity (subtractive)
+    if (wall > 0 && wall < Math.min(width, depth, height) / 2) {
+        const innerWidth = width - (wall * 2);
+        const innerDepth = depth - (wall * 2);
+        const innerHeight = height - wall;
+        
+        const innerGeometry = new THREE.BoxGeometry(innerWidth, innerDepth, innerHeight);
+        innerGeometry.translate(0, 0, (innerHeight / 2) + wall);
+        
+        const innerMaterial = new THREE.MeshPhongMaterial({ color: 0xe24a4a, side: THREE.DoubleSide });
+        const innerMesh = new THREE.Mesh(innerGeometry, innerMaterial);
+        
+        const innerObj = addObjectToScene(innerMesh, 'Cavity', innerGeometry);
+        innerObj.mode = 'subtractive';
+    }
+    
+    // Create lid if requested
+    if (addLid) {
+        const lidHeight = wall;
+        const lidWidth = width + (wall * 2) + (lidGap * 2);
+        const lidDepth = depth + (wall * 2) + (lidGap * 2);
+        
+        const lidGeometry = new THREE.BoxGeometry(lidWidth, lidDepth, lidHeight);
+        lidGeometry.translate(0, 0, lidHeight / 2);
+        
+        const lidMaterial = new THREE.MeshPhongMaterial({ color: 0x4a90e2, side: THREE.DoubleSide });
+        const lidMesh = new THREE.Mesh(lidGeometry, lidMaterial);
+        
+        // Position lid above and to the side
+        lidMesh.position.set(width + 10, 0, 0);
+        
+        const lidObj = addObjectToScene(lidMesh, 'Lid', lidGeometry);
+        lidObj.mode = 'additive';
+        lidObj.transform.position = { x: width + 10, y: 0, z: 0 };
+        
+        // Update UI
+        document.getElementById('obj-pos-x').value = width + 10;
+    }
+    
+    selectObject(outerObj);
+    appendLog(`Created box: ${width}x${depth}x${height}mm, wall: ${wall}mm`);
 }
