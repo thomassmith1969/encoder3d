@@ -1316,6 +1316,15 @@ async function sliceModel() {
         
         if (slicingCancelled) throw new Error('Slicing cancelled by user');
         
+        // Flip X axis only
+        progressDiv.innerText = 'Preparing geometry...';
+        const positions = exportedGeometry.attributes.position.array;
+        for (let i = 0; i < positions.length; i += 3) {
+            positions[i] = -positions[i]; // Negate X
+        }
+        exportedGeometry.attributes.position.needsUpdate = true;
+        exportedGeometry.computeVertexNormals();
+        
         // STEP 2: Wrap exported geometry as processable object for slicer
         const processedObjects = [{
             filename: 'exported_boolean.stl',
