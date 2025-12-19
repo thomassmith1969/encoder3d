@@ -11,6 +11,11 @@
     <script src="js/OBJLoader.js"></script>
     <script src="js/PLYLoader.js"></script>
     <script src="js/SVGLoader.js"></script>
+    <!-- Local vendor scripts (populated by scripts/fetch_vendors.sh) -->
+    <script src="js/vendor/fflate.umd.js"></script>
+    <script src="js/vendor/NURBSCurve.js"></script>
+    <script src="js/vendor/NURBSUtils.js"></script>
+    <script src="js/vendor/FBXLoader.js"></script>
     <script src="js/three-mesh-bvh.umd.cjs"></script>
     <script src="js/three-bvh-csg.umd.cjs"></script>
     <script src="js/csg-init.js"></script>
@@ -117,7 +122,7 @@
             <div class="panel">
                 <h3>Objects (<span id="object-count">0</span>)</h3>
                 <div style="margin: 10px 0;">
-                    <input type="file" id="stl-upload-multi" accept=".stl,.obj,.ply,.svg,.dxf,.3mf" onchange="loadModel()" style="display: none;">
+                    <input type="file" id="stl-upload-multi" accept=".stl,.obj,.ply,.svg,.dxf,.3mf,.fbx,.FBX,.glb,.GLB,.gltf,.GLTF" onchange="loadModel()" style="display: none;">
                     <button onclick="addNewModel()" style="width: 100%; padding: 6px; margin-bottom: 4px;">+ Add Model</button>
                     <button onclick="showPrimitiveMenu()" style="width: 100%; padding: 6px; margin-bottom: 4px;">+ Add Primitive</button>
                     <button onclick="showTemplateMenu()" style="width: 100%; padding: 6px;">+ Add Template</button>
@@ -214,6 +219,9 @@
                         <option value="stl">STL</option>
                         <option value="obj">OBJ</option>
                         <option value="ply">PLY</option>
+                        <option value="fbx">FBX</option>
+                        <option value="glb">GLB (glTF Binary)</option>
+                        <option value="gltf">GLTF (glTF JSON)</option>
                     </select>
                     <button onclick="exportModel()" id="export-btn">Export</button>
                 </div>

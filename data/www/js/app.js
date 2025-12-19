@@ -730,16 +730,156 @@ function loadModel() {
         alert('Please select a model file first');
         return;
     }
+    loadFile(file);
+}
 
-    const extension = file.name.split('.').pop().toLowerCase();
+function loadModelAny() {
+    const fileInput = document.getElementById('stl-upload-any');
+    const file = fileInput.files[0];
+    if (!file) {
+        alert('Please select a file first');
+        return;
+    }
+    loadFile(file);
+}
+
+async function loadLoaderScripts() {
+    const input = document.getElementById('loader-upload');
+    if (!input || !input.files || input.files.length === 0) {
+        alert('Please select one or more .js files to load');
+        return;
+    }
+
+    // Read all files first
+    const files = Array.from(input.files);
+    const readFile = (file) => new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve({ name: file.name, text: reader.result });
+        reader.onerror = () => reject(new Error('Failed to read file: ' + file.name));
+        reader.readAsText(file);
+    });
+
+    let results;
+    try {
+        results = await Promise.all(files.map(readFile));
+    } catch (err) {
+        appendLog('Error reading loader files: ' + err.message);
+        alert('Failed to read loader files: ' + err.message);
+        input.value = '';
+        return;
+    }
+
+    // Prioritize injection order: fflate -> NURBS Utils/Curve -> FBXLoader -> FBXExporter/GLTFExporter -> others
+    const priority = ['fflate', 'fflate.min', 'nurbsutils', 'nurbsutils', 'nurbs', 'nurbscurve', 'fbxloader', 'fbxexporter', 'gltfexporter'];
+    const sorted = results.slice().sort((a, b) => {
+        const na = a.name.toLowerCase();
+        const nb = b.name.toLowerCase();
+        const ia = priority.findIndex(p => na.includes(p));
+        const ib = priority.findIndex(p => nb.includes(p));
+        if (ia === -1 && ib === -1) return 0;
+        if (ia === -1) return 1;
+        if (ib === -1) return -1;
+        return ia - ib;
+    });
+
+    // Inject scripts in order and stop if any throws
+    for (const fileObj of sorted) {
+        try {
+            const script = document.createElement('script');
+            script.type = 'text/javascript';
+            script.text = fileObj.text;
+            document.head.appendChild(script);
+            appendLog('Injected loader script: ' + fileObj.name);
+            // Allow loader to register globals
+            await new Promise(resolve => setTimeout(resolve, 50));
+        } catch (err) {
+            appendLog('Failed to inject script: ' + fileObj.name + ' (' + err.message + ')');
+            alert('Failed to inject script: ' + fileObj.name + ' (' + err.message + ')');
+            input.value = '';
+            return;
+        }
+    }
+
+    // Clear input so same files can be re-selected later
+    input.value = '';
+
+    // Report detection
+    if (window.THREE && THREE.FBXLoader) {
+        appendLog('FBXLoader is now available');
+        alert('FBXLoader injection successful');
+    } else {
+        appendLog('FBXLoader not detected after injection');
+        alert('FBXLoader not available after injection. You may need to upload NURBS utils and fflate UMD as well. Or click "Fetch Loaders" to try downloading from known URLs.');
+    }
+}
+
+// Try fetching a set of known loader URLs and inject them in order
+async function fetchAndInjectScripts() {
+    const candidates = [
+        // local vendor (if already placed)
+        'js/vendor/fflate.umd.js',
+        'js/vendor/fflate.umd.min.js',
+        'js/vendor/NURBSUtils.js',
+        'js/vendor/NURBSCurve.js',
+        'js/vendor/FBXLoader.js',
+        'js/vendor/GLTFLoader.js',
+        'js/vendor/GLTFExporter.js',
+        'js/vendor/FBXExporter.js',
+        // CDN fallbacks
+        'https://cdn.jsdelivr.net/npm/fflate@0.7.4/umd/index.js',
+        'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/curves/NURBSCurve.js',
+        'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/curves/NURBSUtils.js',
+        'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/FBXLoader.js',
+        'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js',
+        'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/exporters/GLTFExporter.js'
+    ];
+
+    const loaded = [];
+    for (const url of candidates) {
+        try {
+            const res = await fetch(url, { cache: 'no-cache' });
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            const text = await res.text();
+            const script = document.createElement('script');
+            script.type = 'text/javascript';
+            script.text = text;
+            document.head.appendChild(script);
+            appendLog('Fetched and injected: ' + url);
+            loaded.push(url);
+            // small delay to allow initialization
+            await new Promise(r => setTimeout(r, 50));
+        } catch (err) {
+            appendLog('Failed to fetch ' + url + ': ' + err.message);
+        }
+    }
+
+    if (window.THREE && THREE.FBXLoader) {
+        appendLog('FBXLoader is now available after fetch');
+        alert('FBXLoader loaded successfully from fetched resources');
+        return true;
+    }
+
+    appendLog('FBXLoader still unavailable after fetch attempts. Tried: ' + loaded.join(', '));
+    alert('FBXLoader not available after fetch attempts. Check logs.');
+    return false;
+}
+
+function loadFile(file) {
+    const extension = file.name
+        .split('.')
+        .pop()
+        .toLowerCase()
+        .split('?')[0]
+        .split('#')[0]
+        .trim();
     appendLog('Loading ' + extension.toUpperCase() + ': ' + file.name + '...');
-    
+
     const reader = new FileReader();
-    reader.onload = function(e) {
+    reader.onload = async function(e) {
         try {
             let mesh = null;
             let geometry = null;
-            
+
             switch(extension) {
                 case 'stl':
                     mesh = loadSTLFromData(e.target.result, file.name);
@@ -754,6 +894,25 @@ function loadModel() {
                 case 'svg':
                     mesh = loadSVGFromData(e.target.result, file.name);
                     break;
+                case 'fbx':
+                    if (!THREE.FBXLoader) {
+                        appendLog('FBX loader not present; attempting to fetch loader scripts automatically...');
+                        const fetched = await fetchAndInjectScripts();
+                        if (!fetched || !THREE.FBXLoader) {
+                            appendLog('Automatic fetch failed or FBXLoader still unavailable');
+                            throw new Error('FBXLoader not available (automatic fetch failed). If you are behind a firewall, open the console and run fetchAndInjectScripts() or upload the loader files via the developer console.');
+                        }
+                        appendLog('FBX loader available after automatic fetch');
+                    }
+
+                    mesh = await loadFBXFromData(e.target.result, file.name);
+                    break;
+                case 'gltf':
+                    mesh = await loadGLTFFromData(e.target.result, file.name, false);
+                    break;
+                case 'glb':
+                    mesh = await loadGLTFFromData(e.target.result, file.name, true);
+                    break;
                 case 'dxf':
                     appendLog('DXF support coming soon');
                     alert('DXF format support is under development');
@@ -765,25 +924,25 @@ function loadModel() {
                 default:
                     throw new Error('Unsupported file format: ' + extension);
             }
-            
+
             if (mesh) {
                 // Add to scene as a new object
                 let geometry;
                 let finalMesh;
-                
+
                 // Handle both direct mesh and objects with children
                 if (mesh.geometry) {
                     geometry = mesh.geometry;
                     finalMesh = mesh;
                 } else if (mesh.children && mesh.children.length > 0) {
-                    // For OBJ files that return a group with multiple meshes, merge them
+                    // For group results merge or pick meshes
                     const meshes = [];
                     mesh.traverse(child => {
                         if (child.geometry && child.geometry.attributes.position && child.geometry.attributes.position.count > 0) {
                             meshes.push(child);
                         }
                     });
-                    
+
                     if (meshes.length === 0) {
                         throw new Error('No geometry found in loaded model');
                     } else if (meshes.length === 1) {
@@ -791,85 +950,56 @@ function loadModel() {
                         finalMesh = meshes[0];
                     } else {
                         // Merge multiple geometries
-                        console.log(`Merging ${meshes.length} meshes from OBJ file`);
                         const mergedGeometry = new THREE.BufferGeometry();
                         const positions = [];
                         const normals = [];
-                        
-                        meshes.forEach((m, idx) => {
+
+                        meshes.forEach((m) => {
                             const geo = m.geometry.clone();
-                            console.log(`Mesh ${idx}: position count = ${geo.attributes.position.count}, has matrix:`, m.matrix);
                             geo.applyMatrix4(m.matrix);
-                            
                             const pos = geo.attributes.position.array;
                             const norm = geo.attributes.normal?.array;
-                            
-                            console.log(`Mesh ${idx}: first 3 positions = [${pos[0]}, ${pos[1]}, ${pos[2]}]`);
-                            
-                            for (let i = 0; i < pos.length; i++) {
-                                positions.push(pos[i]);
-                            }
-                            if (norm) {
-                                for (let i = 0; i < norm.length; i++) {
-                                    normals.push(norm[i]);
-                                }
-                            }
+                            for (let i = 0; i < pos.length; i++) positions.push(pos[i]);
+                            if (norm) for (let i = 0; i < norm.length; i++) normals.push(norm[i]);
                         });
-                        
-                        console.log(`Total positions: ${positions.length / 3} vertices`);
-                        console.log(`First merged position: [${positions[0]}, ${positions[1]}, ${positions[2]}]`);
-                        
+
                         mergedGeometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-                        if (normals.length > 0) {
-                            mergedGeometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
-                        } else {
-                            mergedGeometry.computeVertexNormals();
-                        }
+                        if (normals.length > 0) mergedGeometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+                        else mergedGeometry.computeVertexNormals();
                         mergedGeometry.computeBoundingBox();
-                        console.log('Merged geometry bbox:', mergedGeometry.boundingBox);
-                        
+
                         geometry = mergedGeometry;
-                        
-                        // Create a new mesh with merged geometry
-                        const material = new THREE.MeshPhongMaterial({ 
-                            color: 0x4a90e2,
-                            specular: 0x222222,
-                            shininess: 30
-                        });
+                        const material = new THREE.MeshPhongMaterial({ color: 0x4a90e2, specular: 0x222222, shininess: 30 });
                         finalMesh = new THREE.Mesh(geometry, material);
                     }
                 } else {
                     throw new Error('Invalid mesh structure');
                 }
-                
-                console.log('Final geometry for model info:', geometry, 'bbox:', geometry.boundingBox);
-                
+
                 const obj = addObjectToScene(finalMesh, file.name, geometry);
                 selectObject(obj);
-                
-                // Update info display
                 updateModelInfo(file.name, geometry);
-                
-                // Adjust camera to view
                 adjustCameraToModel(geometry);
-                
                 appendLog('Model loaded: ' + file.name);
             }
-            
-            // Clear file input
-            fileInput.value = '';
+
+            // Clear inputs (guarded)
+            const mainInput = document.getElementById('stl-upload-multi');
+            if (mainInput) mainInput.value = '';
+            const anyInput = document.getElementById('stl-upload-any');
+            if (anyInput) anyInput.value = '';
         } catch (error) {
             appendLog('ERROR loading model: ' + error.message);
             console.error('Model Load Error:', error);
             alert('Failed to load model: ' + error.message);
         }
     };
-    
+
     reader.onerror = function() {
         appendLog('ERROR: Failed to read file');
         alert('Failed to read file');
     };
-    
+
     // Read file based on format
     if (extension === 'svg' || extension === 'dxf' || extension === 'obj' || extension === 'ply') {
         reader.readAsText(file);
@@ -1023,6 +1153,156 @@ function loadSVGFromData(text, filename) {
     group.rotation.x = -Math.PI / 2;
     
     return group.children[0] || group;
+}
+
+// --- FBX and GLTF/GLB Loading Helpers ---
+
+// Dynamically load a script if necessary (used by FBX fallback)
+function loadScript(url) {
+    return new Promise((resolve, reject) => {
+        // Check if already loaded
+        if (document.querySelector(`script[src="${url}"]`)) return resolve();
+        const s = document.createElement('script');
+        s.src = url;
+        s.onload = () => resolve();
+        s.onerror = () => reject(new Error('Failed to load script: ' + url));
+        document.head.appendChild(s);
+    });
+}
+
+async function loadFBXFromData(arrayOrBuffer, filename) {
+    if (!THREE.FBXLoader) throw new Error('FBXLoader not available.');
+
+    // Create a loading manager that returns a tiny embedded placeholder for texture requests
+    const manager = new THREE.LoadingManager();
+    manager.setURLModifier((url) => {
+        appendLog('Texture request suppressed: ' + url);
+        // 1x1 transparent PNG
+        return 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8Xw8AAl8Bn6Xl6JkAAAAASUVORK5CYII=';
+    });
+
+    const parseWithFBX = (input) => {
+        const loader = new THREE.FBXLoader(manager);
+        return loader.parse(input, '');
+    };
+
+    const isArrayBuffer = (v) => v && typeof v.byteLength === 'number';
+
+    // Detect binary or ASCII FBX by header
+    let inputForParse;
+    if (isArrayBuffer(arrayOrBuffer)) {
+        const headerBytes = new Uint8Array(arrayOrBuffer, 0, Math.min(128, arrayOrBuffer.byteLength));
+        const headerText = new TextDecoder('utf-8', { fatal: false }).decode(headerBytes);
+        const isBinary = headerText.includes('Kaydara FBX Binary') || /FBX.*Binary/.test(headerText);
+        if (isBinary) inputForParse = arrayOrBuffer;
+        else inputForParse = new TextDecoder('utf-8').decode(new Uint8Array(arrayOrBuffer));
+    } else if (typeof arrayOrBuffer === 'string') {
+        inputForParse = arrayOrBuffer;
+    } else {
+        throw new Error('Unsupported FBX input type');
+    }
+
+    // Try parsing with current loader, if it fails try dynamic fallback loader (newer version)
+    try {
+        return (function extractMeshFromFBX(fbx) {
+            const group = new THREE.Group();
+            fbx.traverse(child => {
+                if (child.isMesh) {
+                    const geometry = child.geometry.clone();
+                    geometry.applyMatrix4(child.matrix);
+                    const material = new THREE.MeshPhongMaterial({ color: 0x4a90e2, specular: 0x222222, shininess: 30 });
+                    group.add(new THREE.Mesh(geometry, material));
+                }
+            });
+            if (group.children.length === 0) throw new Error('No geometry found in FBX file');
+            return group.children.length === 1 ? group.children[0] : group;
+        })(parseWithFBX(inputForParse));
+    } catch (err) {
+            // Diagnostic info
+            try {
+                let headerSnippet = '';
+                let hexPrefix = '';
+                if (isArrayBuffer) {
+                    const bytes = new Uint8Array(arrayOrBuffer.slice(0, 128));
+                    headerSnippet = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+                    hexPrefix = Array.from(bytes.slice(0, 16)).map(b => b.toString(16).padStart(2, '0')).join(' ');
+                } else if (typeof arrayOrBuffer === 'string') {
+                    headerSnippet = arrayOrBuffer.substring(0, 256);
+                }
+                appendLog('FBX parse failed (native): ' + err.message);
+                appendLog('FBX header snippet (text): ' + headerSnippet);
+                appendLog('FBX header hex: ' + hexPrefix);
+            } catch (dErr) {
+                appendLog('FBX diagnostic extraction failed: ' + dErr.message);
+            }
+
+            // Try fallback loaders. Prefer local vendor copies first, then CDN.
+            const attempted = [];
+            const tryUrls = [
+                'js/vendor/fflate.umd.js',
+                'js/vendor/NURBSCurve.js',
+                'js/vendor/NURBSUtils.js',
+                'js/vendor/FBXLoader.js',
+                'https://cdn.jsdelivr.net/npm/fflate@0.7.4/umd/index.js',
+                'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/curves/NURBSCurve.js',
+                'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/curves/NURBSUtils.js',
+                'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/FBXLoader.js'
+            ];
+
+            let fallbackErr = null;
+            for (const url of tryUrls) {
+                try {
+                    attempted.push(url);
+                    await loadScript(url);
+                } catch (e) {
+                    appendLog('Failed to load script: ' + url + ' (' + e.message + ')');
+                    fallbackErr = e;
+                    continue;
+                }
+            }
+
+            try {
+                // Try parsing again after loading whatever succeeded
+                return (function extractMeshFromFBX(fbx) {
+                    const group = new THREE.Group();
+                    fbx.traverse(child => {
+                        if (child.isMesh) {
+                            const geometry = child.geometry.clone();
+                            geometry.applyMatrix4(child.matrix);
+                            const material = new THREE.MeshPhongMaterial({ color: 0x4a90e2, specular: 0x222222, shininess: 30 });
+                            group.add(new THREE.Mesh(geometry, material));
+                        }
+                    });
+                    if (group.children.length === 0) throw new Error('No geometry found in FBX file');
+                    return group.children.length === 1 ? group.children[0] : group;
+                })(parseWithFBX(inputForParse));
+            } catch (finalErr) {
+                appendLog('FBX parse fallback failed: ' + finalErr.message);
+                throw new Error('FBX parse failed: ' + err.message + ' (attempted: ' + attempted.join(', ') + '; last error: ' + (fallbackErr ? fallbackErr.message : finalErr.message) + ')');
+            }
+    }
+}
+
+function loadGLTFFromData(data, filename, isBinary = false) {
+    if (!THREE.GLTFLoader) throw new Error('GLTFLoader not available.');
+    const loader = new THREE.GLTFLoader();
+
+    return new Promise((resolve, reject) => {
+        const parseInput = isBinary ? data : (typeof data === 'string' ? data : new TextDecoder().decode(data));
+        loader.parse(parseInput, '', (gltf) => {
+            const group = new THREE.Group();
+            gltf.scene.traverse(child => {
+                if (child.isMesh) {
+                    const geometry = child.geometry.clone();
+                    geometry.applyMatrix4(child.matrixWorld);
+                    const material = new THREE.MeshPhongMaterial({ color: 0x4a90e2, specular: 0x222222, shininess: 30 });
+                    group.add(new THREE.Mesh(geometry, material));
+                }
+            });
+            if (group.children.length === 0) return reject(new Error('No geometry found in GLTF file'));
+            return resolve(group.children.length === 1 ? group.children[0] : group);
+        }, (err) => reject(err));
+    });
 }
 
 function updateModelInfo(filename, geometry) {
@@ -2257,7 +2537,21 @@ async function exportModel() {
                 if (progressBar) progressBar.style.width = '0%';
                 return;
             }
-            
+
+        // If exporting to FBX but FBXExporter is missing, try to fetch/inject vendor scripts
+        if (format === 'fbx' && (!window.THREE || !THREE.FBXExporter)) {
+            appendLog('FBXExporter not present; attempting to fetch vendor scripts...');
+            const ok = await fetchAndInjectScripts();
+            if (!ok || !THREE.FBXExporter) {
+                appendLog('FBXExporter not available; falling back to GLB export');
+                // Switch to GLB export without prompting
+                const fmtEl = document.getElementById('export-format');
+                if (fmtEl) fmtEl.value = 'glb';
+                format = 'glb';
+            } else {
+                appendLog('FBXExporter loaded successfully');
+            }
+        }            
             // Check if there are any subtractive objects
             const subtractiveObjects = loadedObjects.filter(obj => obj.mode === 'subtractive' && obj !== selectedObject);
             
@@ -2393,9 +2687,9 @@ async function exportModel() {
                 const filename = selectedObject.filename || 'model';
                 const exported = await exporter.export(geometry, filename, format, progressCallback);
                 appendLog(`Exported: ${exported}`);
-            }
-            
-        } else {
+                }
+
+            } else {
             // Export entire scene
             if (loadedObjects.length === 0) {
                 alert('No objects in scene');
@@ -2533,8 +2827,14 @@ async function exportModel() {
                     document.body.removeChild(csgModal);
                     
                     progressCallback(80, 'Exporting...');
-                    const exported = await exporter.export(resultGeometry, 'scene_boolean', format, progressCallback);
-                    appendLog(`Exported scene with boolean operations: ${exported}`);
+                    if (String(format).toLowerCase() === 'glb') {
+                        const data = await exporter.exportGLTF(resultGeometry, 'scene_boolean.glb', true, progressCallback);
+                        exporter.download(data, 'scene_boolean.glb', 'application/octet-stream');
+                        appendLog('Exported scene with boolean operations: scene_boolean.glb');
+                    } else {
+                        const exported = await exporter.export(resultGeometry, 'scene_boolean', format, progressCallback);
+                        appendLog(`Exported scene with boolean operations: ${exported}`);
+                    }
                     
                 } catch (error) {
                     console.error('Boolean export error:', error);
@@ -2567,8 +2867,14 @@ async function exportModel() {
                     }
                     
                     progressCallback(80, 'Exporting...');
-                    const exported = await exporter.export(mergedGeometry, 'scene', format, progressCallback);
-                    appendLog(`Exported scene (${additiveObjects.length} additive objects): ${exported}`);
+                    if (String(format).toLowerCase() === 'glb') {
+                        const data = await exporter.exportGLTF(mergedGeometry, 'scene.glb', true, progressCallback);
+                        exporter.download(data, 'scene.glb', 'application/octet-stream');
+                        appendLog(`Exported scene (${additiveObjects.length} additive objects): scene.glb`);
+                    } else {
+                        const exported = await exporter.export(mergedGeometry, 'scene', format, progressCallback);
+                        appendLog(`Exported scene (${additiveObjects.length} additive objects): ${exported}`);
+                    }
                 }
             } else {
                 // No subtractive objects - just merge additive
@@ -2599,8 +2905,14 @@ async function exportModel() {
                 }
                 
                 progressCallback(80, 'Exporting...');
-                const exported = await exporter.export(mergedGeometry, 'scene', format, progressCallback);
-                appendLog(`Exported scene (${additiveObjects.length} additive objects): ${exported}`);
+                if (String(format).toLowerCase() === 'glb') {
+                    const data = await exporter.exportGLTF(mergedGeometry, 'scene.glb', true, progressCallback);
+                    exporter.download(data, 'scene.glb', 'application/octet-stream');
+                    appendLog(`Exported scene (${additiveObjects.length} additive objects): scene.glb`);
+                } else {
+                    const exported = await exporter.export(mergedGeometry, 'scene', format, progressCallback);
+                    appendLog(`Exported scene (${additiveObjects.length} additive objects): ${exported}`);
+                }
             }
         }
         
