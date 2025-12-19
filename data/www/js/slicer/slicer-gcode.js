@@ -91,7 +91,11 @@ class GCodeGenerator {
         if (layer.perimeters && layer.perimeters.length > 0) {
             this.addComment('Perimeters');
             layer.perimeters.forEach(perimeter => {
-                this.addPath(perimeter, s.perimeterSpeed || s.printSpeed);
+                // Allow outer/inner wall speeds (fall back to perimeterSpeed or printSpeed)
+                const speed = (perimeter.type === 'outer-wall')
+                    ? (s.perimeterSpeed || s.printSpeed)
+                    : (s.innerPerimeterSpeed || s.perimeterSpeed || s.printSpeed);
+                this.addPath(perimeter, speed);
             });
         }
         
@@ -99,7 +103,8 @@ class GCodeGenerator {
         if (layer.infill && layer.infill.length > 0) {
             this.addComment('Infill');
             layer.infill.forEach(infillPath => {
-                this.addPath(infillPath, s.infillSpeed || s.printSpeed * 1.5);
+                const speed = s.infillSpeed || s.printSpeed * 1.5;
+                this.addPath(infillPath, speed);
             });
         }
         
@@ -246,4 +251,9 @@ class GCodeGenerator {
         
         return `${hours}h ${minutes}m ${seconds}s`;
     }
+}
+
+// Export for Node.js testing
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = GCodeGenerator;
 }

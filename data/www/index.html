@@ -199,6 +199,21 @@
                     <div style="margin-bottom:4px;">Print Speed: <input type="number" id="slice-speed" value="60" style="width:50px"> mm/s</div>
                     <div style="margin-bottom:4px;">Nozzle Temp: <input type="number" id="slice-temp" value="200" style="width:50px">°C</div>
                     <div style="margin-bottom:4px;">Bed Temp: <input type="number" id="slice-bed-temp" value="60" style="width:50px">°C</div>
+
+                    <div style="margin-bottom:4px;">Walls (perimeters): <input type="number" id="slice-walls" value="2" min="0" max="10" step="1" style="width:50px"></div>
+                    <div style="margin-bottom:4px;">Line Width: <input type="number" id="slice-line-width" value="0.4" step="0.05" style="width:60px"> mm</div>
+                    <div style="margin-bottom:4px;">Infill Pattern: 
+                        <select id="slice-infill-pattern" style="padding:4px;">
+                            <option value="rectilinear">Rectilinear</option>
+                            <option value="grid">Grid</option>
+                            <option value="honeycomb">Honeycomb</option>
+                        </select>
+                    </div>
+                    <div style="margin-bottom:4px;">Infill Angle: <input type="number" id="slice-infill-angle" value="45" step="1" min="0" max="180" style="width:50px">°</div>
+                    <div style="margin-bottom:4px;">Infill Overlap: <input type="number" id="slice-infill-overlap" value="15" step="1" min="0" max="100" style="width:50px">%</div>
+                    <div style="margin-bottom:4px;">Min Segment Length: <input type="number" id="slice-min-line-dist" value="0.3" step="0.05" style="width:60px"> mm</div>
+                    <div style="margin-bottom:4px;">Perimeter Speed: <input type="number" id="slice-perimeter-speed" value="50" style="width:50px"> mm/s</div>
+                    <div style="margin-bottom:4px;">Infill Speed: <input type="number" id="slice-infill-speed" value="80" style="width:50px"> mm/s</div>
                 </div>
                 <button onclick="sliceModel()" id="slice-btn" disabled>Slice to GCode</button>
                 <button onclick="cancelSlicing()" id="cancel-slice-btn" style="display:none; background:#d14;" disabled>Cancel</button>

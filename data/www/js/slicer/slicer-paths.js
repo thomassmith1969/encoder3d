@@ -19,6 +19,7 @@ class PathGenerator {
         const perimeters = [];
         const wallCount = settings.wallCount || 2;
         const lineWidth = settings.lineWidth || 0.4;
+        const minSeg = settings.minSegmentLength || 0.3;
         
         contours.forEach(contour => {
             // Generate multiple wall loops
@@ -26,10 +27,12 @@ class PathGenerator {
                 const offset = i * lineWidth;
                 const offsetContour = this.offsetPath(contour, -offset);
                 
-                if (offsetContour && offsetContour.length > 2) {
+                // Remove tiny segments and degenerate contours
+                const clean = this.simplifyPathByMinLength(offsetContour, minSeg);
+                if (clean && clean.length > 2) {
                     perimeters.push({
                         type: i === 0 ? 'outer-wall' : 'inner-wall',
-                        points: offsetContour,
+                        points: clean,
                         width: lineWidth
                     });
                 }
@@ -76,45 +79,77 @@ class PathGenerator {
     generateRectilinearInfill(boundary, density, lineWidth, settings) {
         const infill = [];
         const spacing = lineWidth / density;
-        const angle = (settings.layerIndex % 2) * 90; // Alternate 0° and 90°
+        const angle = (settings.infillAngle || 0) + ((settings.layerIndex || 0) % 2) * 90; // support angle + optional alternation
+        const minSeg = settings.minSegmentLength || 0.3;
+        const overlapPercent = settings.infillOverlap || 0;
+        const overlapDist = (overlapPercent / 100) * lineWidth;
         
         // Get bounding box
         const bbox = this.getBoundingBox(boundary);
-        const diagonal = Math.sqrt(
-            Math.pow(bbox.max.x - bbox.min.x, 2) + 
-            Math.pow(bbox.max.y - bbox.min.y, 2)
-        );
+        const width = bbox.max.x - bbox.min.x;
+        const height = bbox.max.y - bbox.min.y;
+        const diagonal = Math.sqrt(width * width + height * height);
+        const length = diagonal * 1.5;
         
         // Generate scan lines
-        const numLines = Math.ceil(diagonal / spacing);
+        const numLines = Math.ceil(diagonal / spacing) + 2;
         const angleRad = angle * Math.PI / 180;
         const cosA = Math.cos(angleRad);
         const sinA = Math.sin(angleRad);
+        const center = { x: (bbox.min.x + bbox.max.x) / 2, y: (bbox.min.y + bbox.max.y) / 2 };
         
-        for (let i = 0; i < numLines; i++) {
-            const offset = bbox.min.x + (i * spacing) - diagonal / 2;
-            
-            // Create scan line
+        for (let i = -Math.floor(numLines/2); i <= Math.floor(numLines/2); i++) {
+            const d = i * spacing;
+            // normal direction to offset the line
+            const nx = -sinA;
+            const ny = cosA;
+            const offX = center.x + nx * d;
+            const offY = center.y + ny * d;
+
+            // Line along angle passing through offX/offY
             const lineStart = {
-                x: bbox.min.x + offset * cosA - diagonal * sinA,
-                y: bbox.min.y + offset * sinA + diagonal * cosA
+                x: offX - cosA * (length / 2),
+                y: offY - sinA * (length / 2)
             };
             const lineEnd = {
-                x: bbox.min.x + offset * cosA + diagonal * sinA,
-                y: bbox.min.y + offset * sinA - diagonal * cosA
+                x: offX + cosA * (length / 2),
+                y: offY + sinA * (length / 2)
             };
-            
-            // Intersect with boundary
+
+            // Intersect with original boundary
             const intersections = this.linePolygonIntersection(lineStart, lineEnd, boundary);
-            
+
             // Create infill segments from intersection pairs
             for (let j = 0; j < intersections.length - 1; j += 2) {
-                if (intersections[j + 1]) {
-                    infill.push({
-                        type: 'infill',
-                        points: [intersections[j], intersections[j + 1]],
-                        width: lineWidth
-                    });
+                const a = intersections[j];
+                const b = intersections[j + 1];
+                if (b) {
+                    const dx = a.x - b.x;
+                    const dy = a.y - b.y;
+                    const segLen = Math.sqrt(dx*dx + dy*dy);
+                    if (segLen >= minSeg) {
+                        // Extend endpoints by overlap distance along segment direction
+                        let newA = a;
+                        let newB = b;
+                        if (overlapDist > 0) {
+                            const dirX = (b.x - a.x) / segLen;
+                            const dirY = (b.y - a.y) / segLen;
+                            newA = { x: a.x - dirX * overlapDist, y: a.y - dirY * overlapDist };
+                            newB = { x: b.x + dirX * overlapDist, y: b.y + dirY * overlapDist };
+                        }
+
+                        const newDx = newA.x - newB.x;
+                        const newDy = newA.y - newB.y;
+                        const newLen = Math.sqrt(newDx*newDx + newDy*newDy);
+
+                        if (newLen >= minSeg) {
+                            infill.push({
+                                type: 'infill',
+                                points: [newA, newB],
+                                width: lineWidth
+                            });
+                        }
+                    }
                 }
             }
         }
@@ -126,15 +161,15 @@ class PathGenerator {
      * Generate grid infill (perpendicular lines)
      */
     generateGridInfill(boundary, density, lineWidth, settings) {
-        // Generate horizontal lines
-        const horizontal = this.generateRectilinearInfill(boundary, density, lineWidth, 
-            { ...settings, layerIndex: 0 });
+        // First pass at requested angle
+        const a0 = this.generateRectilinearInfill(boundary, density, lineWidth, 
+            { ...settings, layerIndex: settings.layerIndex || 0 });
         
-        // Generate vertical lines
-        const vertical = this.generateRectilinearInfill(boundary, density, lineWidth, 
-            { ...settings, layerIndex: 1 });
+        // Second pass at +90°
+        const a1 = this.generateRectilinearInfill(boundary, density, lineWidth, 
+            { ...settings, layerIndex: settings.layerIndex || 0, infillAngle: (settings.infillAngle || 0) + 90 });
         
-        return [...horizontal, ...vertical];
+        return [...a0, ...a1];
     }
 
     /**
@@ -219,6 +254,43 @@ class PathGenerator {
             x: -dy / len * distance,
             y: dx / len * distance
         };
+    }
+
+    /**
+     * Simplify path by removing vertices that create segments shorter than minLength
+     */
+    simplifyPathByMinLength(path, minLength) {
+        if (!path || path.length < 3) return null;
+        if (!minLength || minLength <= 0) return path;
+
+        const simplified = [];
+        for (let i = 0; i < path.length; i++) {
+            const prev = simplified.length ? simplified[simplified.length - 1] : null;
+            const curr = path[i];
+            if (!prev) {
+                simplified.push(curr);
+                continue;
+            }
+            const dx = curr.x - prev.x;
+            const dy = curr.y - prev.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist >= minLength) {
+                simplified.push(curr);
+            }
+        }
+
+        // Ensure closed loop: check first and last
+        if (simplified.length >= 3) {
+            const first = simplified[0];
+            const last = simplified[simplified.length - 1];
+            const dx = first.x - last.x;
+            const dy = first.y - last.y;
+            if (Math.sqrt(dx * dx + dy * dy) < minLength) {
+                simplified.pop();
+            }
+        }
+
+        return simplified.length >= 3 ? simplified : null;
     }
 
     /**
@@ -353,4 +425,9 @@ class PathGenerator {
         }
         return inside;
     }
+}
+
+// Export for Node.js testing
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = PathGenerator;
 }

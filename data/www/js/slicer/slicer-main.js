@@ -29,6 +29,8 @@ class Encoder3DSlicer {
             infillDensity: 20,
             infillPattern: 'rectilinear', // rectilinear, grid, honeycomb
             infillSpeed: 80,
+            infillAngle: 45,
+            infillOverlap: 15,
             
             // Temperature
             nozzleTemp: 200,
@@ -57,7 +59,8 @@ class Encoder3DSlicer {
             
             // Advanced
             zHop: 0.2,
-            combing: true
+            combing: true,
+            minSegmentLength: 0.3
         };
     }
 

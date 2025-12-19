@@ -1643,9 +1643,21 @@ async function sliceModel() {
         printSpeed: parseInt(document.getElementById('slice-speed').value) || 60,
         nozzleTemp: parseInt(document.getElementById('slice-temp').value) || 200,
         bedTemp: parseInt(document.getElementById('slice-bed-temp').value) || 60,
-        wallCount: 2,
-        lineWidth: 0.4,
-        infillPattern: 'rectilinear',
+
+        // Perimeter / Walls
+        wallCount: parseInt(document.getElementById('slice-walls').value) || 2,
+        lineWidth: parseFloat(document.getElementById('slice-line-width').value) || 0.4,
+        perimeterSpeed: parseInt(document.getElementById('slice-perimeter-speed').value) || 50,
+
+        // Infill
+        infillPattern: document.getElementById('slice-infill-pattern').value || 'rectilinear',
+        infillAngle: parseFloat(document.getElementById('slice-infill-angle').value) || 45,
+        infillOverlap: parseFloat(document.getElementById('slice-infill-overlap').value) || 15,
+        infillSpeed: parseInt(document.getElementById('slice-infill-speed').value) || 80,
+
+        // Advanced
+        minSegmentLength: parseFloat(document.getElementById('slice-min-line-dist').value) || 0.3,
+
         retraction: 5,
         travelSpeed: 150
     };

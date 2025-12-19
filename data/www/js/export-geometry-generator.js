@@ -33,106 +33,106 @@ async function generateExportGeometry(progressCallback = null) {
     resultGeometry.setAttribute('position', new THREE.Float32BufferAttribute(mergedPositions, 3));
     resultGeometry.computeVertexNormals();
     
-    // If no subtractive objects, return merged result
-    if (subtractiveObjects.length === 0) {
-        update(100, 'Merge complete');
-        return resultGeometry;
+    // Apply boolean subtractions if there are any subtractive objects
+    if (subtractiveObjects.length > 0) {
+        update(30, 'Applying boolean subtractions...');
+        
+        // Create mesh for CSG (EXACT export logic)
+        let resultMesh = new THREE.Mesh(resultGeometry);
+        resultMesh.updateMatrixWorld(true);
+        
+        // Subtract each subtractive object using three-bvh-csg (EXACT export logic)
+        const { Brush, Evaluator, SUBTRACTION } = window.THREEDCSG;
+        const evaluator = new Evaluator();
+        
+        for (let i = 0; i < subtractiveObjects.length; i++) {
+            const subObj = subtractiveObjects[i];
+            const baseProgress = 30 + (i / subtractiveObjects.length) * 60;
+            
+            update(baseProgress, `Subtracting object ${i + 1}/${subtractiveObjects.length}...`);
+            
+            // Run async to prevent UI freeze (EXACT export logic)
+            await new Promise(resolve => {
+                setTimeout(() => {
+                    // Clone and prepare geometries - ensure they're indexed (EXACT export logic)
+                    const geomA = resultMesh.geometry.clone();
+                    if (!geomA.index) {
+                        geomA.setIndex(null);
+                        const posArray = geomA.attributes.position.array;
+                        const indices = [];
+                        for (let i = 0; i < posArray.length / 3; i++) {
+                            indices.push(i);
+                        }
+                        geomA.setIndex(indices);
+                    }
+                    if (!geomA.attributes.normal) {
+                        geomA.computeVertexNormals();
+                    }
+                    if (!geomA.attributes.uv) {
+                        const uvArray = new Float32Array(geomA.attributes.position.count * 2);
+                        geomA.setAttribute('uv', new THREE.BufferAttribute(uvArray, 2));
+                    }
+                    
+                    const geomB = subObj.mesh.geometry.clone();
+                    if (!geomB.index) {
+                        geomB.setIndex(null);
+                        const posArray = geomB.attributes.position.array;
+                        const indices = [];
+                        for (let i = 0; i < posArray.length / 3; i++) {
+                            indices.push(i);
+                        }
+                        geomB.setIndex(indices);
+                    }
+                    if (!geomB.attributes.normal) {
+                        geomB.computeVertexNormals();
+                    }
+                    if (!geomB.attributes.uv) {
+                        const uvArray = new Float32Array(geomB.attributes.position.count * 2);
+                        geomB.setAttribute('uv', new THREE.BufferAttribute(uvArray, 2));
+                    }
+                    
+                    // Build BVH trees for CSG operations (EXACT export logic)
+                    const { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } = window.MeshBVHLib;
+                    THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
+                    THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
+                    THREE.Mesh.prototype.raycast = acceleratedRaycast;
+                    
+                    geomA.computeBoundsTree();
+                    geomB.computeBoundsTree();
+                    
+                    // Create brushes - Brush extends Mesh, pass geometry (EXACT export logic)
+                    const brushA = new Brush(geomA);
+                    brushA.position.copy(resultMesh.position);
+                    brushA.rotation.copy(resultMesh.rotation);
+                    brushA.scale.copy(resultMesh.scale);
+                    brushA.updateMatrixWorld(true);
+                    
+                    const brushB = new Brush(geomB);
+                    brushB.position.copy(subObj.mesh.position);
+                    brushB.rotation.copy(subObj.mesh.rotation);
+                    brushB.scale.copy(subObj.mesh.scale);
+                    brushB.updateMatrixWorld(true);
+                    
+                    // Perform CSG subtraction (EXACT export logic)
+                    const result = evaluator.evaluate(brushA, brushB, SUBTRACTION);
+                    resultGeometry = result.geometry;
+                    resultMesh = new THREE.Mesh(resultGeometry);
+                    resultMesh.updateMatrixWorld(true);
+                    resolve();
+                }, 0);
+            });
+        }
+        
+        update(90, 'Boolean operations complete');
     }
     
-    update(30, 'Applying boolean subtractions...');
-    
-    // Create mesh for CSG (EXACT export logic)
-    let resultMesh = new THREE.Mesh(resultGeometry);
-    resultMesh.updateMatrixWorld(true);
-    
-    // Subtract each subtractive object using three-bvh-csg (EXACT export logic)
-    const { Brush, Evaluator, SUBTRACTION } = window.THREEDCSG;
-    const evaluator = new Evaluator();
-    
-    for (let i = 0; i < subtractiveObjects.length; i++) {
-        const subObj = subtractiveObjects[i];
-        const baseProgress = 30 + (i / subtractiveObjects.length) * 60;
-        
-        update(baseProgress, `Subtracting object ${i + 1}/${subtractiveObjects.length}...`);
-        
-        // Run async to prevent UI freeze (EXACT export logic)
-        await new Promise(resolve => {
-            setTimeout(() => {
-                // Clone and prepare geometries - ensure they're indexed (EXACT export logic)
-                const geomA = resultMesh.geometry.clone();
-                if (!geomA.index) {
-                    geomA.setIndex(null);
-                    const posArray = geomA.attributes.position.array;
-                    const indices = [];
-                    for (let i = 0; i < posArray.length / 3; i++) {
-                        indices.push(i);
-                    }
-                    geomA.setIndex(indices);
-                }
-                if (!geomA.attributes.normal) {
-                    geomA.computeVertexNormals();
-                }
-                if (!geomA.attributes.uv) {
-                    const uvArray = new Float32Array(geomA.attributes.position.count * 2);
-                    geomA.setAttribute('uv', new THREE.BufferAttribute(uvArray, 2));
-                }
-                
-                const geomB = subObj.mesh.geometry.clone();
-                if (!geomB.index) {
-                    geomB.setIndex(null);
-                    const posArray = geomB.attributes.position.array;
-                    const indices = [];
-                    for (let i = 0; i < posArray.length / 3; i++) {
-                        indices.push(i);
-                    }
-                    geomB.setIndex(indices);
-                }
-                if (!geomB.attributes.normal) {
-                    geomB.computeVertexNormals();
-                }
-                if (!geomB.attributes.uv) {
-                    const uvArray = new Float32Array(geomB.attributes.position.count * 2);
-                    geomB.setAttribute('uv', new THREE.BufferAttribute(uvArray, 2));
-                }
-                
-                // Build BVH trees for CSG operations (EXACT export logic)
-                const { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } = window.MeshBVHLib;
-                THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
-                THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
-                THREE.Mesh.prototype.raycast = acceleratedRaycast;
-                
-                geomA.computeBoundsTree();
-                geomB.computeBoundsTree();
-                
-                // Create brushes - Brush extends Mesh, pass geometry (EXACT export logic)
-                const brushA = new Brush(geomA);
-                brushA.position.copy(resultMesh.position);
-                brushA.rotation.copy(resultMesh.rotation);
-                brushA.scale.copy(resultMesh.scale);
-                brushA.updateMatrixWorld(true);
-                
-                const brushB = new Brush(geomB);
-                brushB.position.copy(subObj.mesh.position);
-                brushB.rotation.copy(subObj.mesh.rotation);
-                brushB.scale.copy(subObj.mesh.scale);
-                brushB.updateMatrixWorld(true);
-                
-                // Perform CSG subtraction (EXACT export logic)
-                const result = evaluator.evaluate(brushA, brushB, SUBTRACTION);
-                resultGeometry = result.geometry;
-                resultMesh = new THREE.Mesh(resultGeometry);
-                resultMesh.updateMatrixWorld(true);
-                resolve();
-            }, 0);
-        });
-    }
-    
-    update(100, 'Boolean operations complete');
-    
-    // Apply 90-degree X rotation for slicer coordinate system
+    // ALWAYS apply 90-degree X rotation for slicer coordinate system
+    // This happens ONCE, regardless of whether we did boolean operations or not
+    update(95, 'Applying coordinate transform...');
     const rotationMatrix = new THREE.Matrix4().makeRotationX(Math.PI / 2);
     resultGeometry.applyMatrix4(rotationMatrix);
     resultGeometry.computeVertexNormals();
     
+    update(100, 'Complete');
     return resultGeometry;
 }
