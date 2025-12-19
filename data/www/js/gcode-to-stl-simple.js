@@ -173,14 +173,14 @@ class GCodeToSTL {
      * Add a box for an extrusion segment
      */
     addSegmentBox(seg, width, height) {
-        // Convert GCode coords (Z=up) to Three.js coords (Y=up)
-        // Also rotate 180 degrees around Y axis to match slicer orientation
-        const x1 = -seg.x1;  // Negate X for 180 rotation
-        const y1 = seg.z1;   // GCode Z -> Three.js Y
-        const z1 = -seg.y1;  // GCode Y -> Three.js Z, negated for 180 rotation
-        const x2 = -seg.x2;
-        const y2 = seg.z2;
-        const z2 = -seg.y2;
+        // GCode coordinates are X,Y,Z with Z up. Map directly to Three.js coordinates with Z up.
+        // No axis swap or 180° rotation here; keep slicing coordinates consistent with model axes.
+        const x1 = seg.x1;
+        const y1 = seg.y1;
+        const z1 = seg.z1;
+        const x2 = seg.x2;
+        const y2 = seg.y2;
+        const z2 = seg.z2;
         
         const hw = width / 2;
         const hh = height / 2;

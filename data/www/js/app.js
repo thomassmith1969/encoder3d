@@ -840,10 +840,21 @@ async function fetchAndInjectScripts() {
             const res = await fetch(url, { cache: 'no-cache' });
             if (!res.ok) throw new Error('HTTP ' + res.status);
             const text = await res.text();
+            // Basic sanity checks: skip obvious non-JS responses (HTML error pages, 404 text, tiny content)
+            const preview = (text || '').slice(0, 200).trim();
+            if (/^\s*(?:<!doctype|<html|404\b|Not Found)/i.test(preview) || preview.length < 10) {
+                appendLog('Skipping fetched content from ' + url + ' (appears non-JS or empty)');
+                continue;
+            }
             const script = document.createElement('script');
             script.type = 'text/javascript';
-            script.text = text;
-            document.head.appendChild(script);
+            try {
+                script.text = text;
+                document.head.appendChild(script);
+            } catch (e) {
+                appendLog('Failed to inject script from ' + url + ': ' + e.message);
+                continue;
+            }
             appendLog('Fetched and injected: ' + url);
             loaded.push(url);
             // small delay to allow initialization
@@ -2510,7 +2521,7 @@ async function convertLayersToGeometry(layers, layerHeight, progressCallback, pr
  */
 async function exportModel() {
     const exportScene = document.getElementById('export-scene-checkbox').checked;
-    const format = document.getElementById('export-format').value;
+    let format = document.getElementById('export-format').value;
     const exportBtn = document.getElementById('export-btn');
     const progressDiv = document.getElementById('export-progress');
     const progressBar = document.getElementById('export-progress-bar');
@@ -2528,6 +2539,19 @@ async function exportModel() {
             if (progressBar) progressBar.style.width = `${percent}%`;
         };
         
+        // Defensive guard: block unsupported export formats even if selected (removed from UI)
+        {
+            const unsupported = ['fbx','glb','gltf'];
+            if (format && unsupported.includes(String(format).toLowerCase())) {
+                appendLog('Export requested for unsupported format: ' + format);
+                alert('Export format "' + format + '" is not supported by this build. Use STL, OBJ, or PLY.');
+                if (exportBtn) exportBtn.disabled = false;
+                if (progressDiv) progressDiv.innerText = '';
+                if (progressBar) progressBar.style.width = '0%';
+                return;
+            }
+        }
+
         if (!exportScene) {
             // Export selected object with transforms applied
             if (!selectedObject || !selectedObject.geometry) {
@@ -2828,9 +2852,14 @@ async function exportModel() {
                     
                     progressCallback(80, 'Exporting...');
                     if (String(format).toLowerCase() === 'glb') {
-                        const data = await exporter.exportGLTF(resultGeometry, 'scene_boolean.glb', true, progressCallback);
-                        exporter.download(data, 'scene_boolean.glb', 'application/octet-stream');
-                        appendLog('Exported scene with boolean operations: scene_boolean.glb');
+                        try {
+                            const data = await exporter.exportGLTF(resultGeometry, 'scene_boolean.glb', true, progressCallback);
+                            exporter.download(data, 'scene_boolean.glb', 'application/octet-stream');
+                            appendLog('Exported scene with boolean operations: scene_boolean.glb');
+                        } catch (err) {
+                            appendLog('GLB export failed: ' + err.message);
+                            alert('GLB export failed: ' + err.message);
+                        }
                     } else {
                         const exported = await exporter.export(resultGeometry, 'scene_boolean', format, progressCallback);
                         appendLog(`Exported scene with boolean operations: ${exported}`);
@@ -2868,9 +2897,14 @@ async function exportModel() {
                     
                     progressCallback(80, 'Exporting...');
                     if (String(format).toLowerCase() === 'glb') {
-                        const data = await exporter.exportGLTF(mergedGeometry, 'scene.glb', true, progressCallback);
-                        exporter.download(data, 'scene.glb', 'application/octet-stream');
-                        appendLog(`Exported scene (${additiveObjects.length} additive objects): scene.glb`);
+                        try {
+                            const data = await exporter.exportGLTF(mergedGeometry, 'scene.glb', true, progressCallback);
+                            exporter.download(data, 'scene.glb', 'application/octet-stream');
+                            appendLog(`Exported scene (${additiveObjects.length} additive objects): scene.glb`);
+                        } catch (err) {
+                            appendLog('GLB export failed: ' + err.message);
+                            alert('GLB export failed: ' + err.message);
+                        }
                     } else {
                         const exported = await exporter.export(mergedGeometry, 'scene', format, progressCallback);
                         appendLog(`Exported scene (${additiveObjects.length} additive objects): ${exported}`);
@@ -2906,9 +2940,14 @@ async function exportModel() {
                 
                 progressCallback(80, 'Exporting...');
                 if (String(format).toLowerCase() === 'glb') {
-                    const data = await exporter.exportGLTF(mergedGeometry, 'scene.glb', true, progressCallback);
-                    exporter.download(data, 'scene.glb', 'application/octet-stream');
-                    appendLog(`Exported scene (${additiveObjects.length} additive objects): scene.glb`);
+                    try {
+                        const data = await exporter.exportGLTF(mergedGeometry, 'scene.glb', true, progressCallback);
+                        exporter.download(data, 'scene.glb', 'application/octet-stream');
+                        appendLog(`Exported scene (${additiveObjects.length} additive objects): scene.glb`);
+                    } catch (err) {
+                        appendLog('GLB export failed: ' + err.message);
+                        alert('GLB export failed: ' + err.message);
+                    }
                 } else {
                     const exported = await exporter.export(mergedGeometry, 'scene', format, progressCallback);
                     appendLog(`Exported scene (${additiveObjects.length} additive objects): ${exported}`);
@@ -2947,6 +2986,10 @@ function showPrimitiveMenu() {
         modal.style.display = 'flex';
     }
 }
+
+
+
+
 
 function closePrimitiveMenu() {
     const modal = document.getElementById('primitive-modal');
