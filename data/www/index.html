@@ -256,9 +256,21 @@
                 <h3>Preview</h3>
                 <button onclick="toggleGCodePreview()" id="preview-btn" disabled>Show Preview</button>
                 <div style="margin-top:8px;">
-                    <label><input type="checkbox" id="show-moves" checked> Travel Moves</label><br>
-                    <label><input type="checkbox" id="show-extrusions" checked> Extrusions</label><br>
-                    <label style="margin-top:4px; display:inline-block;">Layer: <input type="range" id="layer-slider" min="0" max="0" value="0" disabled style="width:120px"> <span id="layer-num">0</span></label>
+                    <label><input type="checkbox" id="show-moves" checked onchange="updateLayerPreview()"> Travel Moves</label><br>
+                    <label><input type="checkbox" id="show-extrusions" checked onchange="updateLayerPreview()"> Extrusions</label><br>
+                </div>
+                <div style="margin-top:8px;">
+                    <div style="display:flex; gap:4px; justify-content:center; margin-bottom:8px;">
+                        <button onclick="rewindLayers()" id="layer-rewind-btn" disabled style="padding:4px 8px;" title="First Layer">⏮</button>
+                        <button onclick="stepLayerBackward()" id="layer-back-btn" disabled style="padding:4px 8px;" title="Previous Layer">◀</button>
+                        <button onclick="toggleLayerPlayback()" id="layer-play-btn" disabled style="padding:4px 12px;" title="Play/Pause">▶</button>
+                        <button onclick="stepLayerForward()" id="layer-forward-btn" disabled style="padding:4px 8px;" title="Next Layer">▶</button>
+                        <button onclick="fastForwardLayers()" id="layer-ff-btn" disabled style="padding:4px 8px;" title="Last Layer">⏭</button>
+                    </div>
+                    <div style="text-align:center; margin-bottom:4px;">
+                        <span style="font-size:0.9em;">Layer: <span id="layer-num" style="font-weight:bold;">0</span> / <span id="layer-total">0</span></span>
+                    </div>
+                    <input type="range" id="layer-slider" min="0" max="0" value="0" disabled oninput="updateLayerFromSlider()" style="width:100%;">
                 </div>
             </div>
             

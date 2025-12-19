@@ -288,6 +288,10 @@ function appendLog(msg) {
 let scene, camera, renderer, toolhead, controls;
 let gcodePreviewGroup = null;
 let currentGCodeData = null;
+let slicedLayers = null;
+let currentLayerIndex = 0;
+let layerPlaybackInterval = null;
+let isPlayingLayers = false;
 
 // Object management
 let loadedObjects = [];
@@ -1449,6 +1453,13 @@ async function sliceModel() {
         if (cancelBtn) cancelBtn.style.display = 'none';
         
         appendLog(`Slicing complete: ${result.stats.layers} layers, ${result.stats.filamentWeight} filament, ${result.stats.estimatedTime}`);
+        
+        // Store layers for preview
+        slicedLayers = result.layers;
+        currentLayerIndex = 0;
+        
+        // Enable layer controls
+        enableLayerControls(result.layers.length);
         
         // Preview GCode paths
         if (result.layers && result.layers.length > 0) {
@@ -2788,4 +2799,115 @@ function createBox() {
     
     selectObject(outerObj);
     appendLog(`Created box: ${width}x${depth}x${height}mm, wall: ${wall}mm`);
+}
+
+// ============================================================================
+// LAYER PREVIEW CONTROLS
+// ============================================================================
+
+function enableLayerControls(layerCount) {
+    const slider = document.getElementById('layer-slider');
+    const layerNum = document.getElementById('layer-num');
+    const layerTotal = document.getElementById('layer-total');
+    const buttons = ['layer-rewind-btn', 'layer-back-btn', 'layer-play-btn', 'layer-forward-btn', 'layer-ff-btn'];
+    
+    if (slider) {
+        slider.max = layerCount - 1;
+        slider.value = 0;
+        slider.disabled = false;
+    }
+    
+    if (layerNum) layerNum.innerText = '1';
+    if (layerTotal) layerTotal.innerText = layerCount;
+    
+    buttons.forEach(id => {
+        const btn = document.getElementById(id);
+        if (btn) btn.disabled = false;
+    });
+}
+
+function updateLayerFromSlider() {
+    const slider = document.getElementById('layer-slider');
+    if (!slider || !slicedLayers) return;
+    
+    currentLayerIndex = parseInt(slider.value);
+    updateLayerPreview();
+}
+
+function updateLayerPreview() {
+    if (!slicedLayers || currentLayerIndex < 0 || currentLayerIndex >= slicedLayers.length) return;
+    
+    const layerNum = document.getElementById('layer-num');
+    const slider = document.getElementById('layer-slider');
+    
+    if (layerNum) layerNum.innerText = currentLayerIndex + 1;
+    if (slider) slider.value = currentLayerIndex;
+    
+    // Show only layers up to current index
+    const layersToShow = slicedLayers.slice(0, currentLayerIndex + 1);
+    previewSlicedGCode(layersToShow);
+}
+
+function rewindLayers() {
+    if (!slicedLayers) return;
+    currentLayerIndex = 0;
+    stopLayerPlayback();
+    updateLayerPreview();
+}
+
+function stepLayerBackward() {
+    if (!slicedLayers || currentLayerIndex <= 0) return;
+    currentLayerIndex--;
+    stopLayerPlayback();
+    updateLayerPreview();
+}
+
+function stepLayerForward() {
+    if (!slicedLayers || currentLayerIndex >= slicedLayers.length - 1) return;
+    currentLayerIndex++;
+    stopLayerPlayback();
+    updateLayerPreview();
+}
+
+function fastForwardLayers() {
+    if (!slicedLayers) return;
+    currentLayerIndex = slicedLayers.length - 1;
+    stopLayerPlayback();
+    updateLayerPreview();
+}
+
+function toggleLayerPlayback() {
+    if (isPlayingLayers) {
+        stopLayerPlayback();
+    } else {
+        startLayerPlayback();
+    }
+}
+
+function startLayerPlayback() {
+    if (!slicedLayers || isPlayingLayers) return;
+    
+    isPlayingLayers = true;
+    const playBtn = document.getElementById('layer-play-btn');
+    if (playBtn) playBtn.innerText = '⏸';
+    
+    layerPlaybackInterval = setInterval(() => {
+        if (currentLayerIndex >= slicedLayers.length - 1) {
+            stopLayerPlayback();
+            return;
+        }
+        currentLayerIndex++;
+        updateLayerPreview();
+    }, 200); // 200ms per layer
+}
+
+function stopLayerPlayback() {
+    isPlayingLayers = false;
+    const playBtn = document.getElementById('layer-play-btn');
+    if (playBtn) playBtn.innerText = '▶';
+    
+    if (layerPlaybackInterval) {
+        clearInterval(layerPlaybackInterval);
+        layerPlaybackInterval = null;
+    }
 }
