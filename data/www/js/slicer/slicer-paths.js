@@ -17,7 +17,9 @@ class PathGenerator {
     generatePerimeters(contours, settings) {
         this.settings = settings;
         const perimeters = [];
-        const wallCount = settings.wallCount || 2;
+        const wallCount = (settings.wallCount !== undefined && settings.wallCount !== null)
+            ? settings.wallCount
+            : 2;
         const lineWidth = settings.lineWidth || 0.4;
         const minSeg = settings.minSegmentLength || 0.3;
         
@@ -50,14 +52,23 @@ class PathGenerator {
      * @returns {Array} Infill paths
      */
     generateInfill(contours, perimeters, settings) {
-        const infillDensity = (settings.infillDensity || 20) / 100;
+        const infillDensityPct = (settings.infillDensity !== undefined && settings.infillDensity !== null)
+            ? settings.infillDensity
+            : 20;
+        const infillDensity = infillDensityPct / 100;
         const lineWidth = settings.lineWidth || 0.4;
         const pattern = settings.infillPattern || 'rectilinear';
         
-        if (infillDensity === 0) return [];
+        if (!Number.isFinite(infillDensity) || infillDensity <= 0) return [];
+
+        if (!contours || contours.length === 0) return [];
         
-        // Get infill boundary (innermost perimeter)
-        const boundary = this.getInfillBoundary(perimeters);
+        // Get infill boundary:
+        // - If perimeters exist, use the innermost perimeter.
+        // - If wallCount=0 (no perimeters), fall back to the outer contour so we can do infill-only.
+        const boundary = (perimeters && perimeters.length > 0)
+            ? this.getInfillBoundary(perimeters)
+            : this.getLargestContour(contours);
         if (!boundary || boundary.length < 3) return [];
         
         // Generate pattern based on type
@@ -382,6 +393,31 @@ class PathGenerator {
         }
         
         return perimeters[perimeters.length - 1].points;
+    }
+
+    getLargestContour(contours) {
+        if (!contours || contours.length === 0) return null;
+        let best = contours[0];
+        let bestArea = Math.abs(this.polygonArea(best));
+        for (let i = 1; i < contours.length; i++) {
+            const area = Math.abs(this.polygonArea(contours[i]));
+            if (area > bestArea) {
+                bestArea = area;
+                best = contours[i];
+            }
+        }
+        return best;
+    }
+
+    polygonArea(points) {
+        if (!points || points.length < 3) return 0;
+        let area = 0;
+        for (let i = 0; i < points.length; i++) {
+            const a = points[i];
+            const b = points[(i + 1) % points.length];
+            area += (a.x * b.y - b.x * a.y);
+        }
+        return area * 0.5;
     }
 
     /**

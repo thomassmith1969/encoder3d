@@ -91,10 +91,13 @@ class GCodeGenerator {
         if (layer.perimeters && layer.perimeters.length > 0) {
             this.addComment('Perimeters');
             layer.perimeters.forEach(perimeter => {
-                // Allow outer/inner wall speeds (fall back to perimeterSpeed or printSpeed)
-                const speed = (perimeter.type === 'outer-wall')
+                // Allow per-path speed override (from per-object settings)
+                const fallbackSpeed = (perimeter.type === 'outer-wall')
                     ? (s.perimeterSpeed || s.printSpeed)
                     : (s.innerPerimeterSpeed || s.perimeterSpeed || s.printSpeed);
+                const speed = (perimeter.speed !== undefined && perimeter.speed !== null)
+                    ? perimeter.speed
+                    : fallbackSpeed;
                 this.addPath(perimeter, speed);
             });
         }
@@ -103,7 +106,10 @@ class GCodeGenerator {
         if (layer.infill && layer.infill.length > 0) {
             this.addComment('Infill');
             layer.infill.forEach(infillPath => {
-                const speed = s.infillSpeed || s.printSpeed * 1.5;
+                const fallbackSpeed = s.infillSpeed || s.printSpeed * 1.5;
+                const speed = (infillPath.speed !== undefined && infillPath.speed !== null)
+                    ? infillPath.speed
+                    : fallbackSpeed;
                 this.addPath(infillPath, speed);
             });
         }

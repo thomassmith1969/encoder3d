@@ -181,6 +181,26 @@
                             </select>
                         </label>
                     </div>
+
+                    <hr style="border-color: #444; margin: 10px 0;">
+                    <div style="margin-bottom: 6px;"><strong style="font-size: 0.9em;">Per-object Slicing (Overrides)</strong></div>
+                    <div style="font-size: 0.85em; color: #999; margin-bottom: 6px;">Leave blank to use global slicer settings.</div>
+                    <div class="transform-row">
+                        <label>Walls: <input type="number" id="obj-slice-walls" min="0" max="20" step="1" placeholder="(global)" onchange="applyObjectSlicerOverrides()"></label>
+                        <label>Infill %: <input type="number" id="obj-slice-infill" min="0" max="100" step="1" placeholder="(global)" onchange="applyObjectSlicerOverrides()"></label>
+                        <label>Speed: <input type="number" id="obj-slice-speed" min="1" max="500" step="1" placeholder="(global)" onchange="applyObjectSlicerOverrides()"></label>
+                    </div>
+                    <div class="transform-row">
+                        <label style="width: 100%;">Infill Pattern:
+                            <select id="obj-slice-infill-pattern" onchange="applyObjectSlicerOverrides()" style="padding: 4px; width: 100%;">
+                                <option value="">(global)</option>
+                                <option value="rectilinear">Rectilinear</option>
+                                <option value="grid">Grid</option>
+                                <option value="honeycomb">Honeycomb</option>
+                            </select>
+                        </label>
+                    </div>
+
                     <div style="font-size: 0.85em; color: #999; margin-top: 4px;">
                         Size: <span id="obj-actual-size">--</span><br>
                         Position: <span id="obj-position-display">--</span><br>
@@ -214,6 +234,9 @@
                     <div style="margin-bottom:4px;">Min Segment Length: <input type="number" id="slice-min-line-dist" value="0.3" step="0.05" style="width:60px"> mm</div>
                     <div style="margin-bottom:4px;">Perimeter Speed: <input type="number" id="slice-perimeter-speed" value="50" style="width:50px"> mm/s</div>
                     <div style="margin-bottom:4px;">Infill Speed: <input type="number" id="slice-infill-speed" value="80" style="width:50px"> mm/s</div>
+                    <div style="margin-bottom:6px; color:#bbb;">
+                        <label><input type="checkbox" id="slice-resolve-overlaps" checked> Resolve additive overlaps (by object order)</label>
+                    </div>
                 </div>
                 <button onclick="sliceModel()" id="slice-btn" disabled>Slice to GCode</button>
                 <button onclick="cancelSlicing()" id="cancel-slice-btn" style="display:none; background:#d14;" disabled>Cancel</button>

@@ -80,66 +80,83 @@ class Encoder3DSlicer {
         // Allow UI to update
         await new Promise(resolve => setTimeout(resolve, 10));
         
-        // Slice all objects
+        // Slice all objects (apply per-object overrides)
         const allLayers = [];
-        let maxLayerCount = 0;
-        
         for (let i = 0; i < objects.length; i++) {
             const obj = objects[i];
             if (progressCallback) {
                 progressCallback((i / objects.length) * 30, `Slicing object ${i + 1}/${objects.length}: ${obj.filename}`);
             }
-            
-            // Allow UI to update and check for cancellation
+
             await new Promise(resolve => setTimeout(resolve, 10));
-            
-            const layers = this.core.sliceGeometry(
-                obj.geometry,
-                obj.transform,
-                settings
-            );
-            
-            allLayers.push({ object: obj, layers: layers });
-            maxLayerCount = Math.max(maxLayerCount, layers.length);
+
+            const objSettings = this.applyPerObjectOverrides(settings, obj.slicerOverrides);
+            const layers = this.core.sliceGeometry(obj.geometry, obj.transform, objSettings);
+            allLayers.push({ object: obj, layers, settings: objSettings });
         }
-        
+
         if (progressCallback) progressCallback(35, 'Merging layers...');
         await new Promise(resolve => setTimeout(resolve, 10));
-        
-        // Merge layers from all objects by Z height
-        const mergedLayers = this.mergeLayers(allLayers, maxLayerCount);
+
+        // Merge layers by Z height, while preserving object identity
+        const mergedLayers = this.mergeLayersByZ(allLayers, settings.layerHeight || 0.2);
         
         console.log(`After merge: ${mergedLayers.length} total merged layers`);
         
         if (progressCallback) progressCallback(40, 'Generating toolpaths...');
-        
-        // Generate paths for each layer
+
+        // Generate toolpaths per object per layer and flatten into merged layers
         for (let i = 0; i < mergedLayers.length; i++) {
             if (progressCallback) {
                 progressCallback(40 + (i / mergedLayers.length) * 40, `Layer ${i + 1}/${mergedLayers.length}`);
             }
-            
-            // Allow UI to update every 5 layers
+
             if (i % 5 === 0) {
                 await new Promise(resolve => setTimeout(resolve, 10));
             }
-            
+
             const layer = mergedLayers[i];
-            
-            // Connect segments into contours
-            const contours = this.core.connectSegments(layer.segments);
-            
-            // Generate perimeters
-            layer.perimeters = this.pathGen.generatePerimeters(contours, {
-                ...settings,
-                layerIndex: i
-            });
-            
-            // Generate infill
-            layer.infill = this.pathGen.generateInfill(contours, layer.perimeters, {
-                ...settings,
-                layerIndex: i
-            });
+            layer.perimeters = [];
+            layer.infill = [];
+
+            for (const entry of layer.objectEntries) {
+                // Skip subtractive objects (they're only used for cutting)
+                if (entry.object && entry.object.mode === 'subtractive') continue;
+
+                const contours = this.core.connectSegments(entry.segments);
+
+                const perimeters = this.pathGen.generatePerimeters(contours, {
+                    ...entry.settings,
+                    layerIndex: i
+                });
+
+                // Attach per-path settings
+                perimeters.forEach(p => {
+                    p.sourceObjectId = entry.object && entry.object.id;
+                    p.sourceFilename = entry.object && entry.object.filename;
+                    const os = entry.settings || {};
+                    const speed = (p.type === 'outer-wall')
+                        ? (os.perimeterSpeed || os.printSpeed)
+                        : (os.innerPerimeterSpeed || os.perimeterSpeed || os.printSpeed);
+                    p.speed = speed;
+                    p.width = p.width || os.lineWidth;
+                });
+
+                const infill = this.pathGen.generateInfill(contours, perimeters, {
+                    ...entry.settings,
+                    layerIndex: i
+                });
+                infill.forEach(p => {
+                    p.sourceObjectId = entry.object && entry.object.id;
+                    p.sourceFilename = entry.object && entry.object.filename;
+                    const os = entry.settings || {};
+                    p.speed = os.infillSpeed || (os.printSpeed ? os.printSpeed * 1.5 : undefined);
+                    p.width = p.width || os.lineWidth;
+                });
+
+                layer.perimeters.push(...perimeters);
+                layer.infill.push(...infill);
+            }
         }
         
         if (progressCallback) progressCallback(85, 'Generating GCode...');
@@ -168,79 +185,85 @@ class Encoder3DSlicer {
     }
 
     /**
-     * Merge layers from multiple objects by Z height
+     * Apply per-object slicer overrides while keeping critical global constraints.
+     * For now, we only allow a small set of overrides that are safe with a single
+     * interwoven GCode output.
      */
-    mergeLayers(allLayers, maxLayerCount) {
-        const mergedLayers = [];
-        const epsilon = 0.01; // Z height tolerance
-        
-        // Create layer structure
-        for (let i = 0; i < maxLayerCount; i++) {
-            mergedLayers.push({
-                index: i,
-                z: 0,
-                additiveSegments: [],
-                subtractiveSegments: [],
-                segments: [],
-                perimeters: [],
-                infill: []
-            });
+    applyPerObjectOverrides(baseSettings, overrides) {
+        if (!overrides) return { ...baseSettings };
+        const allowed = [
+            'wallCount',
+            'infillDensity',
+            'printSpeed',
+            'perimeterSpeed',
+            'innerPerimeterSpeed',
+            'infillSpeed',
+            'lineWidth',
+            'infillPattern',
+            'infillAngle',
+            'infillOverlap',
+            'minSegmentLength'
+        ];
+        const merged = { ...baseSettings };
+        for (const key of allowed) {
+            if (overrides[key] !== undefined) merged[key] = overrides[key];
         }
-        
-        // Separate additive and subtractive objects
+        return merged;
+    }
+
+    /**
+     * Merge layers from multiple objects by Z height while preserving per-object segments/settings.
+     */
+    mergeLayersByZ(allLayers, layerHeight) {
+        const epsilon = Math.max(0.0005, (layerHeight || 0.2) * 0.1);
+        const merged = [];
+
+        const findLayer = (z) => merged.find(l => Math.abs(l.z - z) < epsilon);
+
+        // Build merged layer buckets
         allLayers.forEach(objLayers => {
-            const isSubtractive = objLayers.object.mode === 'subtractive';
-            console.log(`Object "${objLayers.object.filename}" mode: ${objLayers.object.mode} (isSubtractive: ${isSubtractive})`);
-            
             objLayers.layers.forEach(layer => {
-                // Find matching merged layer by Z height
-                let targetLayer = mergedLayers.find(ml => 
-                    Math.abs(ml.z - layer.z) < epsilon
-                );
-                
-                if (!targetLayer) {
-                    // Create new layer if needed (layer.index might be out of bounds)
-                    targetLayer = {
-                        index: mergedLayers.length,
+                let bucket = findLayer(layer.z);
+                if (!bucket) {
+                    bucket = {
+                        index: merged.length,
                         z: layer.z,
-                        additiveSegments: [],
-                        subtractiveSegments: [],
-                        segments: [],
+                        objectEntries: [],
                         perimeters: [],
                         infill: []
                     };
-                    mergedLayers.push(targetLayer);
+                    merged.push(bucket);
                 }
-                
-                // Add segments to appropriate array
-                if (isSubtractive) {
-                    targetLayer.subtractiveSegments.push(...layer.segments);
-                } else {
-                    targetLayer.additiveSegments.push(...layer.segments);
-                }
+                bucket.objectEntries.push({
+                    object: objLayers.object,
+                    segments: layer.segments,
+                    settings: objLayers.settings
+                });
             });
         });
-        
-        // Process boolean operations for each layer
-        mergedLayers.forEach(layer => {
-            if (layer.subtractiveSegments.length > 0 && layer.additiveSegments.length > 0) {
-                console.log(`Layer ${layer.index}: ${layer.additiveSegments.length} additive segments, ${layer.subtractiveSegments.length} subtractive segments`);
-                // Build subtractive contours
-                const subtractiveContours = this.core.connectSegments(layer.subtractiveSegments);
-                console.log(`Layer ${layer.index}: Built ${subtractiveContours.length} subtractive contours`);
-                
-                // Filter additive segments that aren't inside subtractive contours
-                layer.segments = this.subtractSegments(layer.additiveSegments, subtractiveContours);
-                console.log(`Layer ${layer.index}: After subtraction, ${layer.segments.length} segments remain`);
-            } else {
-                // No subtraction needed, just use additive segments
-                layer.segments = layer.additiveSegments;
+
+        // If there are subtractive objects and additive objects, apply segment filtering per object
+        merged.forEach(layer => {
+            const subtractiveSegs = [];
+            const additiveEntries = [];
+            for (const entry of layer.objectEntries) {
+                if (entry.object && entry.object.mode === 'subtractive') subtractiveSegs.push(...entry.segments);
+                else additiveEntries.push(entry);
             }
+
+            if (subtractiveSegs.length > 0 && additiveEntries.length > 0) {
+                const subtractiveContours = this.core.connectSegments(subtractiveSegs);
+                for (const entry of additiveEntries) {
+                    entry.segments = this.subtractSegments(entry.segments, subtractiveContours);
+                }
+            }
+
+            // Remove entries with no segments
+            layer.objectEntries = layer.objectEntries.filter(e => e.segments && e.segments.length > 0);
         });
-        
-        // Remove empty layers and sort by Z
-        return mergedLayers
-            .filter(layer => layer.segments.length > 0)
+
+        return merged
+            .filter(layer => layer.objectEntries.length > 0)
             .sort((a, b) => a.z - b.z)
             .map((layer, index) => ({ ...layer, index }));
     }

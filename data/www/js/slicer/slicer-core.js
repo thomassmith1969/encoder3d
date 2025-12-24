@@ -82,22 +82,34 @@ class SlicerCore {
      */
     sliceLayer(geometry, z, transform, layerIndex) {
         const positions = geometry.attributes.position.array;
+        const indices = geometry.index ? geometry.index.array : null;
         const segments = [];
         
         // Apply transform matrix
         const matrix = this.getTransformMatrix(transform);
         
-        // Iterate through triangles
-        for (let i = 0; i < positions.length; i += 9) {
-            // Get triangle vertices
-            const v1 = this.applyMatrix(new THREE.Vector3(positions[i], positions[i+1], positions[i+2]), matrix);
-            const v2 = this.applyMatrix(new THREE.Vector3(positions[i+3], positions[i+4], positions[i+5]), matrix);
-            const v3 = this.applyMatrix(new THREE.Vector3(positions[i+6], positions[i+7], positions[i+8]), matrix);
-            
-            // Find intersections with Z plane
-            const intersection = this.trianglePlaneIntersection(v1, v2, v3, z);
-            if (intersection) {
-                segments.push(intersection);
+        // Iterate through triangles (indexed or non-indexed)
+        if (indices) {
+            for (let i = 0; i < indices.length; i += 3) {
+                const ia = indices[i] * 3;
+                const ib = indices[i + 1] * 3;
+                const ic = indices[i + 2] * 3;
+
+                const v1 = this.applyMatrix(new THREE.Vector3(positions[ia], positions[ia + 1], positions[ia + 2]), matrix);
+                const v2 = this.applyMatrix(new THREE.Vector3(positions[ib], positions[ib + 1], positions[ib + 2]), matrix);
+                const v3 = this.applyMatrix(new THREE.Vector3(positions[ic], positions[ic + 1], positions[ic + 2]), matrix);
+
+                const intersection = this.trianglePlaneIntersection(v1, v2, v3, z);
+                if (intersection) segments.push(intersection);
+            }
+        } else {
+            for (let i = 0; i < positions.length; i += 9) {
+                const v1 = this.applyMatrix(new THREE.Vector3(positions[i], positions[i + 1], positions[i + 2]), matrix);
+                const v2 = this.applyMatrix(new THREE.Vector3(positions[i + 3], positions[i + 4], positions[i + 5]), matrix);
+                const v3 = this.applyMatrix(new THREE.Vector3(positions[i + 6], positions[i + 7], positions[i + 8]), matrix);
+
+                const intersection = this.trianglePlaneIntersection(v1, v2, v3, z);
+                if (intersection) segments.push(intersection);
             }
         }
 

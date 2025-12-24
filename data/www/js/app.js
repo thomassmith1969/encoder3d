@@ -396,6 +396,7 @@ function addObjectToScene(mesh, filename, geometry) {
         filename: filename,
         originalSize: originalSize,
         mode: 'additive',  // 'additive' or 'subtractive'
+        slicerOverrides: {},
         transform: {
             position: { x: 0, y: 0, z: 0 },
             rotation: { x: 0, y: 0, z: 0 },
@@ -459,11 +460,53 @@ function selectObject(obj) {
     }
     
     document.getElementById('obj-mode').value = obj.mode || 'additive';
+
+    // Per-object slicer overrides (blank means use global)
+    const o = obj.slicerOverrides || {};
+    const ow = document.getElementById('obj-slice-walls');
+    const oi = document.getElementById('obj-slice-infill');
+    const os = document.getElementById('obj-slice-speed');
+    const op = document.getElementById('obj-slice-infill-pattern');
+    if (ow) ow.value = (o.wallCount !== undefined && o.wallCount !== null) ? o.wallCount : '';
+    if (oi) oi.value = (o.infillDensity !== undefined && o.infillDensity !== null) ? o.infillDensity : '';
+    if (os) os.value = (o.printSpeed !== undefined && o.printSpeed !== null) ? o.printSpeed : '';
+    if (op) op.value = (o.infillPattern !== undefined && o.infillPattern !== null) ? o.infillPattern : '';
     
     // Update mesh material color based on mode
     updateMeshMaterial(obj);
     
     updateSizeDisplay();
+}
+
+function applyObjectSlicerOverrides() {
+    if (!selectedObject) return;
+    if (!selectedObject.slicerOverrides) selectedObject.slicerOverrides = {};
+
+    const wallEl = document.getElementById('obj-slice-walls');
+    const infillEl = document.getElementById('obj-slice-infill');
+    const speedEl = document.getElementById('obj-slice-speed');
+    const infillPatternEl = document.getElementById('obj-slice-infill-pattern');
+
+    const parseOptionalInt = (el) => {
+        if (!el) return undefined;
+        const raw = (el.value || '').toString().trim();
+        if (raw === '') return undefined;
+        const n = parseInt(raw, 10);
+        return Number.isFinite(n) ? n : undefined;
+    };
+
+    const wallCount = parseOptionalInt(wallEl);
+    const infillDensity = parseOptionalInt(infillEl);
+    const printSpeed = parseOptionalInt(speedEl);
+    const infillPatternRaw = infillPatternEl ? (infillPatternEl.value || '').toString().trim() : '';
+    const infillPattern = infillPatternRaw === '' ? undefined : infillPatternRaw;
+
+    // Store only explicitly set overrides
+    const o = selectedObject.slicerOverrides;
+    if (wallCount === undefined) delete o.wallCount; else o.wallCount = wallCount;
+    if (infillDensity === undefined) delete o.infillDensity; else o.infillDensity = infillDensity;
+    if (printSpeed === undefined) delete o.printSpeed; else o.printSpeed = printSpeed;
+    if (infillPattern === undefined) delete o.infillPattern; else o.infillPattern = infillPattern;
 }
 
 function applyMode() {
@@ -1636,67 +1679,83 @@ async function sliceModel() {
     slicingCancelled = false;
     
     // Get slicer settings from UI
+    const parseIntOr = (elId, fallback) => {
+        const el = document.getElementById(elId);
+        const n = el ? parseInt(el.value, 10) : NaN;
+        return Number.isFinite(n) ? n : fallback;
+    };
+
     const settings = {
         layerHeight: parseFloat(document.getElementById('slice-layer-height').value) || 0.2,
         maxZHeight: parseFloat(document.getElementById('slice-max-z').value) || 200,
-        infillDensity: parseInt(document.getElementById('slice-infill').value) || 20,
-        printSpeed: parseInt(document.getElementById('slice-speed').value) || 60,
-        nozzleTemp: parseInt(document.getElementById('slice-temp').value) || 200,
-        bedTemp: parseInt(document.getElementById('slice-bed-temp').value) || 60,
+        infillDensity: parseIntOr('slice-infill', 20),
+        printSpeed: parseIntOr('slice-speed', 60),
+        nozzleTemp: parseIntOr('slice-temp', 200),
+        bedTemp: parseIntOr('slice-bed-temp', 60),
 
         // Perimeter / Walls
-        wallCount: parseInt(document.getElementById('slice-walls').value) || 2,
+        wallCount: parseIntOr('slice-walls', 2),
         lineWidth: parseFloat(document.getElementById('slice-line-width').value) || 0.4,
-        perimeterSpeed: parseInt(document.getElementById('slice-perimeter-speed').value) || 50,
+        perimeterSpeed: parseIntOr('slice-perimeter-speed', 50),
 
         // Infill
         infillPattern: document.getElementById('slice-infill-pattern').value || 'rectilinear',
         infillAngle: parseFloat(document.getElementById('slice-infill-angle').value) || 45,
         infillOverlap: parseFloat(document.getElementById('slice-infill-overlap').value) || 15,
-        infillSpeed: parseInt(document.getElementById('slice-infill-speed').value) || 80,
+        infillSpeed: parseIntOr('slice-infill-speed', 80),
 
         // Advanced
         minSegmentLength: parseFloat(document.getElementById('slice-min-line-dist').value) || 0.3,
 
         retraction: 5,
-        travelSpeed: 150
+        travelSpeed: 150,
+
+        // Overlap resolution (handled in export step)
+        resolveAdditiveOverlaps: !!(document.getElementById('slice-resolve-overlaps') && document.getElementById('slice-resolve-overlaps').checked)
     };
     
     try {
         await new Promise(resolve => setTimeout(resolve, 50));
         
-        // STEP 1: Use exportModel logic to generate processed geometry with booleans
-        progressDiv.innerText = 'Generating export geometry (with booleans)...';
+        // STEP 1: Use exportModel logic to generate processed geometry with booleans (per object)
+        progressDiv.innerText = 'Generating export geometry (with booleans, per object)...';
         if (progressBar) progressBar.style.width = '10%';
         
-        const exportedGeometry = await generateExportGeometry((p, msg) => {
+        const exported = await generateExportGeometriesPerObject((p, msg) => {
             progressDiv.innerText = `Export: ${msg} (${Math.round(p)}%)`;
             if (progressBar) progressBar.style.width = `${10 + p * 0.4}%`;
-        });
+        }, { resolveAdditiveOverlaps: settings.resolveAdditiveOverlaps });
         
         if (slicingCancelled) throw new Error('Slicing cancelled by user');
-        
-        // Flip X axis only
+
+        // STEP 2: Flip X axis and wrap each exported geometry as processable object for slicer
         progressDiv.innerText = 'Preparing geometry...';
-        const positions = exportedGeometry.attributes.position.array;
-        for (let i = 0; i < positions.length; i += 3) {
-            positions[i] = -positions[i]; // Negate X
-        }
-        exportedGeometry.attributes.position.needsUpdate = true;
-        exportedGeometry.computeVertexNormals();
-        
-        // STEP 2: Wrap exported geometry as processable object for slicer
-        const processedObjects = [{
-            filename: 'exported_boolean.stl',
-            geometry: exportedGeometry,
-            mesh: new THREE.Mesh(exportedGeometry),
-            mode: 'additive',
-            transform: {
-                position: { x: 0, y: 0, z: 0 },
-                rotation: { x: 0, y: 0, z: 0 },
-                scale: { x: 1, y: 1, z: 1 }
+        const processedObjects = exported.map(ex => {
+            const geo = ex.geometry;
+            const positions = geo.attributes.position.array;
+            for (let i = 0; i < positions.length; i += 3) {
+                positions[i] = -positions[i]; // Negate X
             }
-        }];
+            geo.attributes.position.needsUpdate = true;
+            geo.computeVertexNormals();
+
+            // Find original object to pull per-object slicer overrides
+            const srcObj = loadedObjects.find(o => o.id === ex.sourceObjectId);
+            const slicerOverrides = srcObj && srcObj.slicerOverrides ? { ...srcObj.slicerOverrides } : {};
+
+            return {
+                filename: (ex.filename || 'object') + '_boolean.stl',
+                geometry: geo,
+                mesh: new THREE.Mesh(geo),
+                mode: 'additive',
+                slicerOverrides,
+                transform: {
+                    position: { x: 0, y: 0, z: 0 },
+                    rotation: { x: 0, y: 0, z: 0 },
+                    scale: { x: 1, y: 1, z: 1 }
+                }
+            };
+        });
         
         progressDiv.innerText = 'Slicing exported geometry...';
         if (progressBar) progressBar.style.width = '50%';
